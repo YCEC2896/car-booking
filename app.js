@@ -63,7 +63,7 @@ async function loadBookingsAndBlocked() {
 // ===== Realtime 訂閱 =====
 function subscribeRealtime() {
   if (realtimeChannel) db.removeChannel(realtimeChannel);
-  realtimeChannel = supabase
+  realtimeChannel = db
     .channel('car-booking-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => loadBookingsAndBlocked())
     .on('postgres_changes', { event: '*', schema: 'public', table: 'blocked_slots' }, () => loadBookingsAndBlocked())
