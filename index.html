@@ -23,7 +23,6 @@
   <!-- 主應用 -->
   <div id="mainApp" style="display:none">
 
-    <!-- 頂部導覽 -->
     <header class="header">
       <div class="header-inner">
         <div class="logo">
@@ -39,7 +38,7 @@
     <div class="modal-overlay" id="adminModal">
       <div class="modal">
         <div class="modal-title">管理員登入</div>
-        <input type="text" class="modal-input" id="adminPassword" placeholder="請輸入管理員密碼" autocomplete="off">
+        <input type="text" class="modal-input" id="adminPassword" placeholder="請輸入密碼" autocomplete="off">
         <div class="modal-error" id="adminError"></div>
         <div class="modal-actions">
           <button class="btn btn-ghost" id="adminCancelBtn">取消</button>
@@ -48,14 +47,7 @@
       </div>
     </div>
 
-    <!-- 主內容 -->
     <main class="main">
-
-      <!-- 車輛列表 -->
-      <section class="vehicle-section">
-        <div class="section-label">車輛</div>
-        <div class="vehicle-tabs" id="vehicleTabs"></div>
-      </section>
 
       <!-- 月曆 -->
       <section class="calendar-section">
@@ -73,7 +65,18 @@
         </div>
       </section>
 
-      <!-- 登記紀錄列表 -->
+      <!-- 車輛管理（管理員限定）-->
+      <section id="vehicleMgmt" style="display:none">
+        <div class="section-label">車輛管理</div>
+        <div id="vehicleMgmtList" class="mgmt-list"></div>
+        <div class="mgmt-add">
+          <input type="text" class="form-input" id="newVehicleName" placeholder="車輛名稱（例：新北一號）">
+          <input type="text" class="form-input" id="newVehiclePlate" placeholder="車牌（例：ABC-1234）">
+          <button class="btn btn-primary" id="addVehicleBtn">新增車輛</button>
+        </div>
+      </section>
+
+      <!-- 登記紀錄 -->
       <section class="log-section">
         <div class="section-label">登記紀錄</div>
         <div class="booking-log" id="bookingLog"></div>
@@ -81,70 +84,14 @@
 
     </main>
 
-    <!-- 日期詳情側邊欄 -->
+    <!-- 側邊欄 -->
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-date" id="sidebarDate"></div>
         <button class="sidebar-close" id="sidebarClose">✕</button>
       </div>
-      <div class="sidebar-body">
-        <div class="booking-list" id="bookingList"></div>
-        <div class="booking-form" id="bookingForm">
-          <div class="form-title">新增預約</div>
-          <div class="form-group">
-            <label>時段</label>
-            <div class="period-options">
-              <label class="period-opt"><input type="radio" name="period" value="full"> 整天</label>
-              <label class="period-opt"><input type="radio" name="period" value="morning"> 上午</label>
-              <label class="period-opt"><input type="radio" name="period" value="afternoon"> 下午</label>
-              <label class="period-opt"><input type="radio" name="period" value="custom"> 自訂</label>
-            </div>
-          </div>
-          <div class="form-group" id="customTime" style="display:none">
-            <label>自訂時間</label>
-            <div class="time-row">
-              <input type="time" class="time-input" id="startTime">
-              <span>—</span>
-              <input type="time" class="time-input" id="endTime">
-            </div>
-          </div>
-          <div class="form-group">
-            <label>姓名</label>
-            <input type="text" class="form-input" id="userName" placeholder="請輸入姓名">
-          </div>
-          <div class="form-group">
-            <label>用途 / 專案名</label>
-            <input type="text" class="form-input" id="userPurpose" placeholder="請輸入用途或專案名稱">
-          </div>
-          <button class="btn btn-primary btn-block" id="submitBooking">確認預約</button>
-        </div>
-        <div class="admin-section" id="adminSection" style="display:none">
-          <div class="form-title admin-title">🔧 管理員功能</div>
-          <div class="form-group">
-            <label>封鎖時段</label>
-            <div class="period-options">
-              <label class="period-opt"><input type="radio" name="blockPeriod" value="full"> 整天</label>
-              <label class="period-opt"><input type="radio" name="blockPeriod" value="morning"> 上午</label>
-              <label class="period-opt"><input type="radio" name="blockPeriod" value="afternoon"> 下午</label>
-              <label class="period-opt"><input type="radio" name="blockPeriod" value="custom"> 自訂</label>
-            </div>
-          </div>
-          <div class="form-group" id="blockCustomTime" style="display:none">
-            <label>自訂時間</label>
-            <div class="time-row">
-              <input type="time" class="time-input" id="blockStartTime">
-              <span>—</span>
-              <input type="time" class="time-input" id="blockEndTime">
-            </div>
-          </div>
-          <div class="form-group">
-            <label>原因（選填）</label>
-            <input type="text" class="form-input" id="blockReason" placeholder="例：車輛保養">
-          </div>
-          <button class="btn btn-danger btn-block" id="submitBlock">封鎖此時段</button>
-        </div>
-      </div>
+      <div class="sidebar-body" id="sidebarBody"></div>
     </aside>
 
   </div>
