@@ -564,3 +564,128 @@ body {
   .main { padding: 20px 14px 60px; }
   .calendar-day { min-height: 38px; }
 }
+
+/* ===== 辦公室選擇畫面 ===== */
+.office-picker {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+.office-picker-inner {
+  text-align: center;
+  padding: 40px 20px;
+}
+.picker-logo { font-size: 48px; margin-bottom: 16px; }
+.picker-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.picker-subtitle {
+  font-size: 14px;
+  color: var(--text2);
+  margin-bottom: 36px;
+}
+.office-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  max-width: 360px;
+  margin: 0 auto;
+}
+.office-pick-btn {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  font-family: inherit;
+  padding: 32px 20px;
+  cursor: pointer;
+  transition: var(--transition);
+  letter-spacing: 0.05em;
+}
+.office-pick-btn:hover {
+  border-color: var(--accent);
+  background: rgba(79,142,247,0.1);
+  color: var(--accent);
+  transform: translateY(-2px);
+}
+
+/* ===== 返回按鈕 ===== */
+.back-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+.back-btn:hover { color: var(--text); border-color: var(--text2); }
+
+/* ===== 登記紀錄列表 ===== */
+.log-section { }
+.booking-log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.log-item {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  grid-template-rows: auto auto;
+  gap: 2px 12px;
+  align-items: center;
+}
+.log-date {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px;
+  color: var(--accent);
+  grid-row: 1;
+}
+.log-info {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  grid-row: 1;
+}
+.log-name { font-size: 14px; font-weight: 500; }
+.log-period {
+  font-size: 11px;
+  background: rgba(79,142,247,0.15);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+.log-plate {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--text3);
+}
+.log-purpose {
+  font-size: 12px;
+  color: var(--text2);
+  grid-column: 2;
+  grid-row: 2;
+}
+.log-empty {
+  text-align: center;
+  color: var(--text3);
+  font-size: 13px;
+  padding: 24px;
+}
