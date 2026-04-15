@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>公務車借用系統</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 頂部導覽 -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">🚗</span>
+        <span class="logo-text">公務車借用系統</span>
+      </div>
+      <button class="admin-btn" id="adminBtn">管理員入口</button>
+    </div>
+  </header>
+
+  <!-- 管理員密碼彈窗 -->
+  <div class="modal-overlay" id="adminModal">
+    <div class="modal">
+      <div class="modal-title">管理員登入</div>
+      <input type="password" class="modal-input" id="adminPassword" placeholder="請輸入管理員密碼">
+      <div class="modal-error" id="adminError"></div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="adminCancelBtn">取消</button>
+        <button class="btn btn-primary" id="adminConfirmBtn">確認</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主內容 -->
+  <main class="main">
+
+    <!-- 辦公室切換 -->
+    <section class="office-section">
+      <div class="section-label">選擇辦公室</div>
+      <div class="office-tabs" id="officeTabs"></div>
+    </section>
+
+    <!-- 車輛列表 -->
+    <section class="vehicle-section">
+      <div class="section-label">車輛</div>
+      <div class="vehicle-tabs" id="vehicleTabs"></div>
+    </section>
+
+    <!-- 月曆 -->
+    <section class="calendar-section">
+      <div class="calendar-header">
+        <button class="nav-btn" id="prevMonth">&#8592;</button>
+        <div class="calendar-title" id="calendarTitle"></div>
+        <button class="nav-btn" id="nextMonth">&#8594;</button>
+      </div>
+      <div class="calendar-grid" id="calendarGrid"></div>
+      <div class="legend">
+        <span class="legend-item"><span class="dot dot-available"></span>可借用</span>
+        <span class="legend-item"><span class="dot dot-partial"></span>部分已借</span>
+        <span class="legend-item"><span class="dot dot-full"></span>已借滿</span>
+        <span class="legend-item"><span class="dot dot-blocked"></span>封鎖</span>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 日期詳情側邊欄 -->
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-date" id="sidebarDate"></div>
+      <button class="sidebar-close" id="sidebarClose">✕</button>
+    </div>
+
+    <div class="sidebar-body">
+
+      <!-- 已有預約 -->
+      <div class="booking-list" id="bookingList"></div>
+
+      <!-- 新增預約 -->
+      <div class="booking-form" id="bookingForm">
+        <div class="form-title">新增預約</div>
+
+        <div class="form-group">
+          <label>時段</label>
+          <div class="period-options" id="periodOptions">
+            <label class="period-opt">
+              <input type="radio" name="period" value="full"> 整天
+            </label>
+            <label class="period-opt">
+              <input type="radio" name="period" value="morning"> 上午
+            </label>
+            <label class="period-opt">
+              <input type="radio" name="period" value="afternoon"> 下午
+            </label>
+            <label class="period-opt">
+              <input type="radio" name="period" value="custom"> 自訂
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group custom-time" id="customTime" style="display:none">
+          <label>自訂時間</label>
+          <div class="time-row">
+            <input type="time" class="time-input" id="startTime">
+            <span>—</span>
+            <input type="time" class="time-input" id="endTime">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>姓名</label>
+          <input type="text" class="form-input" id="userName" placeholder="請輸入姓名">
+        </div>
+
+        <div class="form-group">
+          <label>用途 / 專案名</label>
+          <input type="text" class="form-input" id="userPurpose" placeholder="請輸入用途或專案名稱">
+        </div>
+
+        <button class="btn btn-primary btn-block" id="submitBooking">確認預約</button>
+      </div>
+
+      <!-- 管理員區塊 -->
+      <div class="admin-section" id="adminSection" style="display:none">
+        <div class="form-title admin-title">🔧 管理員功能</div>
+        <div class="form-group">
+          <label>封鎖時段</label>
+          <div class="period-options" id="blockPeriodOptions">
+            <label class="period-opt">
+              <input type="radio" name="blockPeriod" value="full"> 整天
+            </label>
+            <label class="period-opt">
+              <input type="radio" name="blockPeriod" value="morning"> 上午
+            </label>
+            <label class="period-opt">
+              <input type="radio" name="blockPeriod" value="afternoon"> 下午
+            </label>
+            <label class="period-opt">
+              <input type="radio" name="blockPeriod" value="custom"> 自訂
+            </label>
+          </div>
+        </div>
+        <div class="form-group custom-time" id="blockCustomTime" style="display:none">
+          <label>自訂時間</label>
+          <div class="time-row">
+            <input type="time" class="time-input" id="blockStartTime">
+            <span>—</span>
+            <input type="time" class="time-input" id="blockEndTime">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>原因（選填）</label>
+          <input type="text" class="form-input" id="blockReason" placeholder="例：車輛保養">
+        </div>
+        <button class="btn btn-danger btn-block" id="submitBlock">封鎖此時段</button>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- 提示訊息 -->
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js"></script>
+</body>
+</html>
