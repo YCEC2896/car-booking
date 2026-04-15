@@ -3,7 +3,7 @@ const SUPABASE_URL = 'https://ioftnuhttlzkcbxlnsvp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZnRudWh0dGx6a2NieGxuc3ZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyMzIwNDcsImV4cCI6MjA5MTgwODA0N30.d4JzELooUvKMwxMgbZPBV5TxsVAR1kVOSEME_jFwJ2o';
 const ADMIN_PASSWORD = 'admin1234'; // ← 可以改成你想要的密碼
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ===== 狀態 =====
 let offices = [];
@@ -27,7 +27,7 @@ async function init() {
 
 // ===== 載入辦公室 =====
 async function loadOffices() {
-  const { data, error } = await supabase.from('offices').select('*').order('name');
+  const { data, error } = await db.from('offices').select('*').order('name');
   if (error) { showToast('載入辦公室失敗', 'error'); return; }
   offices = data;
   renderOfficeTabs();
@@ -36,7 +36,7 @@ async function loadOffices() {
 
 // ===== 載入車輛 =====
 async function loadVehicles(officeId) {
-  const { data, error } = await supabase.from('vehicles').select('*').eq('office_id', officeId).order('name');
+  const { data, error } = await db.from('vehicles').select('*').eq('office_id', officeId).order('name');
   if (error) { showToast('載入車輛失敗', 'error'); return; }
   vehicles = data;
   renderVehicleTabs();
@@ -51,8 +51,8 @@ async function loadBookingsAndBlocked() {
   const endDate = new Date(currentYear, currentMonth + 1, 0).toISOString().split('T')[0];
 
   const [b, bl] = await Promise.all([
-    supabase.from('bookings').select('*').eq('vehicle_id', selectedVehicleId).gte('date', startDate).lte('date', endDate),
-    supabase.from('blocked_slots').select('*').eq('vehicle_id', selectedVehicleId).gte('date', startDate).lte('date', endDate)
+    db.from('bookings').select('*').eq('vehicle_id', selectedVehicleId).gte('date', startDate).lte('date', endDate),
+    db.from('blocked_slots').select('*').eq('vehicle_id', selectedVehicleId).gte('date', startDate).lte('date', endDate)
   ]);
   bookings = b.data || [];
   blockedSlots = bl.data || [];
@@ -62,7 +62,7 @@ async function loadBookingsAndBlocked() {
 
 // ===== Realtime 訂閱 =====
 function subscribeRealtime() {
-  if (realtimeChannel) supabase.removeChannel(realtimeChannel);
+  if (realtimeChannel) db.removeChannel(realtimeChannel);
   realtimeChannel = supabase
     .channel('car-booking-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => loadBookingsAndBlocked())
@@ -260,7 +260,7 @@ async function submitBooking() {
     end_time: period === 'custom' ? endTime : null,
   };
 
-  const { error } = await supabase.from('bookings').insert(payload);
+  const { error } = await db.from('bookings').insert(payload);
   if (error) { showToast('預約失敗，請重試', 'error'); return; }
 
   showToast('預約成功！', 'success');
@@ -288,7 +288,7 @@ async function submitBlock() {
     end_time: period === 'custom' ? endTime : null,
   };
 
-  const { error } = await supabase.from('blocked_slots').insert(payload);
+  const { error } = await db.from('blocked_slots').insert(payload);
   if (error) { showToast('封鎖失敗，請重試', 'error'); return; }
 
   showToast('時段已封鎖', 'success');
@@ -299,7 +299,7 @@ async function submitBlock() {
 // ===== 刪除紀錄（管理員）=====
 async function deleteRecord(id, type) {
   const table = type === 'booking' ? 'bookings' : 'blocked_slots';
-  const { error } = await supabase.from(table).delete().eq('id', id);
+  const { error } = await db.from(table).delete().eq('id', id);
   if (error) { showToast('刪除失敗', 'error'); return; }
   showToast('已刪除', 'success');
 }
