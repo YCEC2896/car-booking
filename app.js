@@ -1,6 +1,6 @@
 const SUPABASE_URL = 'https://ioftnuhttlzkcbxlnsvp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvZnRudWh0dGx6a2NieGxuc3ZwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyMzIwNDcsImV4cCI6MjA5MTgwODA0N30.d4JzELooUvKMwxMgbZPBV5TxsVAR1kVOSEME_jFwJ2o';
-const PASSWORDS = { admin: 'super888' };
+let ADMIN_PASSWORD = null;
 const FIXED_OFFICE_NAME = '新北';
 const PERIODS = [
   { value:'full', label:'整天',        start:'08:00', end:'18:00' },
@@ -23,7 +23,7 @@ let blockSelectedDates=new Set();
 
 async function init() {
   await loadFixedOffice();
-  await Promise.all([loadBlockReasons(), loadVehicles()]);
+  await Promise.all([loadAdminPassword(), loadBlockReasons(), loadVehicles()]);
   setupEventListeners();
   await loadMonthData();
   await loadAllBookings();
@@ -33,6 +33,10 @@ async function init() {
 async function loadFixedOffice() {
   const { data }=await db.from('offices').select('*').eq('name',FIXED_OFFICE_NAME).single();
   if(data){ selectedOfficeId=data.id; document.getElementById('currentOfficeName').textContent=data.name; }
+}
+async function loadAdminPassword() {
+  const { data }=await db.from('settings').select('value').eq('key','admin_password').single();
+  if(data) ADMIN_PASSWORD=data.value;
 }
 async function loadBlockReasons() {
   const { data }=await db.from('block_reasons').select('*').order('reason');
@@ -240,8 +244,8 @@ function renderVehicleDetail(dateStr,vehicleId){
       <div class="form-title">新增預約</div>
       <div class="form-group">
         <label>員工編號</label>
-        <input type="text" class="form-input" id="empId" placeholder="請輸入員工編號（3碼）">
-        <span class="form-sub-hint">請輸入3碼編號</span>
+        <input type="text" class="form-input" id="empId" placeholder="請輸入員工編號" maxlength="3" pattern="[0-9]{3}">
+        
       </div>
       <div class="form-group">
         <label>姓名</label>
@@ -258,6 +262,7 @@ function renderVehicleDetail(dateStr,vehicleId){
   document.getElementById('backToList')?.addEventListener('click',()=>{ selectedVehicleIdInSidebar=null; renderVehicleList(dateStr); });
   document.getElementById('empId')?.addEventListener('blur', async function(){
     const id=this.value.trim(); if(!id) return;
+    if(id.length!==3){ showToast('員工編號須為3碼','error'); this.value=''; document.getElementById('userName').value=''; return; }
     const name=await lookupEmployeeById(id);
     const nameField=document.getElementById('userName');
     if(name){ nameField.value=name; showToast('已帶入姓名','success'); }
@@ -579,7 +584,7 @@ function openAdminModal(){
 }
 function confirmAdmin(){
   const pw=document.getElementById('adminPassword').value.trim();
-  if(pw===PASSWORDS.admin){ adminLevel='admin'; document.getElementById('adminModal').classList.remove('open'); updateAdminUI(); showToast('已進入管理員模式','success'); }
+  if(ADMIN_PASSWORD && pw===ADMIN_PASSWORD){ adminLevel='admin'; document.getElementById('adminModal').classList.remove('open'); updateAdminUI(); showToast('已進入管理員模式','success'); }
   else document.getElementById('adminError').textContent='密碼錯誤';
 }
 function updateAdminUI(){
