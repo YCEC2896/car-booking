@@ -11,15 +11,19 @@ const PERIODS = [
 ];
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-let vehicles=[], employees=[], blockReasons=[];
+let vehicles=[], blockReasons=[];
 let bookings={}, blockedSlots={}, allBookings=[];
 let selectedOfficeId=null, selectedDate=null, selectedVehicleIdInSidebar=null;
 let currentYear=new Date().getFullYear(), currentMonth=new Date().getMonth();
 let adminLevel=null, realtimeChannel=null;
 
+// 封鎖面板月曆狀態
+let blockCalYear=new Date().getFullYear(), blockCalMonth=new Date().getMonth();
+let blockSelectedDates=new Set();
+
 async function init() {
   await loadFixedOffice();
-  await Promise.all([loadEmployees(), loadBlockReasons(), loadVehicles()]);
+  await Promise.all([loadBlockReasons(), loadVehicles()]);
   setupEventListeners();
   await loadMonthData();
   await loadAllBookings();
@@ -30,9 +34,21 @@ async function loadFixedOffice() {
   const { data }=await db.from('offices').select('*').eq('name',FIXED_OFFICE_NAME).single();
   if(data){ selectedOfficeId=data.id; document.getElementById('currentOfficeName').textContent=data.name; }
 }
-async function loadEmployees() { const { data }=await db.from('employees').select('*'); employees=data||[]; }
-async function loadBlockReasons() { const { data }=await db.from('block_reasons').select('*').order('reason'); blockReasons=data||[]; }
-async function loadVehicles() { const { data }=await db.from('vehicles').select('*').eq('office_id',selectedOfficeId).order('plate'); vehicles=data||[]; }
+async function loadBlockReasons() {
+  const { data }=await db.from('block_reasons').select('*').order('reason');
+  blockReasons=data||[];
+}
+async function loadVehicles() {
+  const { data }=await db.from('vehicles').select('*').eq('office_id',selectedOfficeId).order('plate');
+  vehicles=data||[];
+}
+
+// 安全的員工查詢：只用編號查單筆，不載入全表
+async function lookupEmployeeById(empId) {
+  if(!empId) return null;
+  const { data }=await db.from('employees').select('name').eq('employee_id', empId).single();
+  return data ? data.name : null;
+}
 
 async function loadMonthData() {
   const s=new Date(currentYear,currentMonth,1).toISOString().split('T')[0];
@@ -93,10 +109,7 @@ function getVehicleDayStatus(dayB,dayBl){
 }
 function isAllVehiclesFullBlocked(dateStr){
   if(!vehicles.length) return false;
-  return vehicles.every(v=>{
-    const vbl=(blockedSlots[v.id]||[]).filter(b=>b.date===dateStr);
-    return vehicleIsFullDayBlocked(vbl);
-  });
+  return vehicles.every(v=>vehicleIsFullDayBlocked((blockedSlots[v.id]||[]).filter(b=>b.date===dateStr)));
 }
 function getDayOverallStatus(dateStr){
   if(!vehicles.length) return 'available';
@@ -110,7 +123,7 @@ function getDayOverallStatus(dateStr){
   return 'full';
 }
 
-// 月曆
+// 主月曆
 function renderCalendar(){
   document.getElementById('calendarTitle').textContent=`${currentYear} 年 ${currentMonth+1} 月`;
   const grid=document.getElementById('calendarGrid');
@@ -127,7 +140,7 @@ function renderCalendar(){
     const allBlocked=!isPast&&isAllVehiclesFullBlocked(ds);
     const status=getDayOverallStatus(ds);
     const dotClass={available:'available',partial:'partial',full:'full'}[status]||'full';
-    const dot=isPast?'':allBlocked?'':` <div class="day-dots"><span class="dot-small ${dotClass}"></span></div>`;
+    const dot=isPast||allBlocked?'':` <div class="day-dots"><span class="dot-small ${dotClass}"></span></div>`;
     html+=`<div class="calendar-day ${isToday?'today':''} ${isPast?'past':''} ${allBlocked?'all-blocked':''}" data-date="${ds}"><span class="day-num">${d}</span>${dot}</div>`;
   }
   grid.innerHTML=html;
@@ -170,9 +183,9 @@ function renderVehicleList(dateStr){
     if(isFullBlocked){
       const reasons=vbl.filter(b=>b.period==='full').map(b=>b.reason).filter(Boolean);
       const reasonText=reasons.length?reasons.join('、'):'';
-      html+=`<div class="vehicle-day-card status-blocked no-entry" data-vid="${v.id}">
-        <div class="vdc-info"><div class="vdc-plate">${v.plate}</div>${reasonText?`<div class="vdc-block-reason">${reasonText}</div>`:''}
-        </div><div class="vdc-status">封鎖中</div>
+      html+=`<div class="vehicle-day-card status-blocked no-entry">
+        <div class="vdc-info"><div class="vdc-plate">${v.plate}</div>${reasonText?`<div class="vdc-block-reason">${reasonText}</div>`:''}</div>
+        <div class="vdc-status">封鎖中</div>
       </div>`;
     } else {
       html+=`<div class="vehicle-day-card ${statusClass}" data-vid="${v.id}">
@@ -217,7 +230,6 @@ function renderVehicleDetail(dateStr,vehicleId){
     </div>`;
   });
   if(!recordsHtml) recordsHtml='<div class="empty-state">此日期尚無預約</div>';
-
   const periodOptionsHtml=buildPeriodOptions(allItems,'period');
 
   body.innerHTML=`
@@ -228,11 +240,12 @@ function renderVehicleDetail(dateStr,vehicleId){
       <div class="form-title">新增預約</div>
       <div class="form-group">
         <label>員工編號</label>
-        <input type="text" class="form-input" id="empId" placeholder="輸入3碼，個位數與兩位數請補零（如：001）">
+        <input type="text" class="form-input" id="empId" placeholder="請輸入員工編號">
+        <span class="form-sub-hint">請輸入3碼編號</span>
       </div>
       <div class="form-group">
         <label>姓名</label>
-        <input type="text" class="form-input" id="userName" placeholder="查詢員工編號後自動帶入" readonly>
+        <input type="text" class="form-input" id="userName" placeholder="查詢後自動帶入" readonly>
       </div>
       <div class="form-group"><label>用途 / 專案名</label><input type="text" class="form-input" id="userPurpose" placeholder="請輸入用途或專案名稱"></div>
       <div class="form-group">
@@ -243,51 +256,39 @@ function renderVehicleDetail(dateStr,vehicleId){
     </div>`;
 
   document.getElementById('backToList')?.addEventListener('click',()=>{ selectedVehicleIdInSidebar=null; renderVehicleList(dateStr); });
-  document.getElementById('empId')?.addEventListener('blur',lookupEmployee);
+  document.getElementById('empId')?.addEventListener('blur', async function(){
+    const id=this.value.trim(); if(!id) return;
+    const name=await lookupEmployeeById(id);
+    const nameField=document.getElementById('userName');
+    if(name){ nameField.value=name; showToast('已帶入姓名','success'); }
+    else{ nameField.value=''; showToast('找不到此員工編號','error'); }
+  });
   document.getElementById('submitBooking')?.addEventListener('click',submitBooking);
   body.querySelectorAll('.booking-delete').forEach(btn=>{ btn.addEventListener('click',()=>deleteRecord(btn.dataset.id,btn.dataset.type)); });
   setupPeriodMutualExclusion(body);
 }
 
-function buildPeriodOptions(existingItems,radioName){
+function buildPeriodOptions(existingItems,name){
   const subPs=PERIODS.filter(p=>p.value!=='full');
   const fullDisabled=isConflictWithExisting('full',existingItems);
-  const fullHtml=`<label class="period-opt${fullDisabled?' disabled':''}"><input type="checkbox" name="${radioName}" value="full" ${fullDisabled?'disabled':''}><span>整天</span></label>`;
-  const subHtml=subPs.map(p=>{
-    const disabled=isConflictWithExisting(p.value,existingItems);
-    return `<label class="period-opt${disabled?' disabled':''}"><input type="checkbox" name="${radioName}" value="${p.value}" ${disabled?'disabled':''}><span>${p.label}</span></label>`;
-  }).join('');
-  return `<div class="period-group">
-    <div class="period-group-section"><div class="period-full-row">${fullHtml}</div></div>
-    <div class="period-group-section"><div class="period-sub">${subHtml}</div></div>
-  </div>`;
+  const fullHtml=`<label class="period-opt${fullDisabled?' disabled':''}"><input type="checkbox" name="${name}" value="full" ${fullDisabled?'disabled':''}><span>整天</span></label>`;
+  const subHtml=subPs.map(p=>{ const disabled=isConflictWithExisting(p.value,existingItems); return `<label class="period-opt${disabled?' disabled':''}"><input type="checkbox" name="${name}" value="${p.value}" ${disabled?'disabled':''}><span>${p.label}</span></label>`; }).join('');
+  return `<div class="period-group"><div class="period-group-section"><div class="period-full-row">${fullHtml}</div></div><div class="period-group-section"><div class="period-sub">${subHtml}</div></div></div>`;
 }
 
 function setupPeriodMutualExclusion(container){
   container.querySelectorAll('input[name="period"]').forEach(input=>{
     input.addEventListener('change',()=>{
-      if(input.value==='full'&&input.checked){
-        container.querySelectorAll('input[name="period"]').forEach(o=>{ if(o.value!=='full') o.checked=false; });
-      } else if(input.value!=='full'&&input.checked){
-        const fi=container.querySelector('input[name="period"][value="full"]');
-        if(fi) fi.checked=false;
-      }
+      if(input.value==='full'&&input.checked) container.querySelectorAll('input[name="period"]').forEach(o=>{ if(o.value!=='full') o.checked=false; });
+      else if(input.value!=='full'&&input.checked){ const fi=container.querySelector('input[name="period"][value="full"]'); if(fi) fi.checked=false; }
     });
   });
 }
 
-function isConflictWithExisting(periodValue,existingItems){
-  const newP=getPeriod(periodValue); if(!newP) return false;
+function isConflictWithExisting(pv,items){
+  const newP=getPeriod(pv); if(!newP) return false;
   const nr={s:toMinutes(newP.start),e:toMinutes(newP.end)};
-  return existingItems.some(item=>{ const r=periodToRange(item.period); return r&&rangesOverlap(nr,r); });
-}
-
-function lookupEmployee(){
-  const id=document.getElementById('empId')?.value.trim(); if(!id) return;
-  const emp=employees.find(e=>e.employee_id===id);
-  const nameField=document.getElementById('userName');
-  if(emp){ if(nameField) nameField.value=emp.name; showToast(`找到：${emp.name}`,'success'); }
-  else{ if(nameField) nameField.value=''; showToast('找不到此員工編號','error'); }
+  return items.some(item=>{ const r=periodToRange(item.period); return r&&rangesOverlap(nr,r); });
 }
 
 async function submitBooking(){
@@ -358,17 +359,18 @@ function formatDateTime24(isoStr){
   return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-// 封鎖面板（多時段、多天）
+// ===== 封鎖面板（月曆多選）=====
 function openBlockPanel(){
   document.getElementById('blockPanel').classList.add('open');
   document.getElementById('blockPanelOverlay').classList.add('open');
-  const today=new Date().toISOString().split('T')[0];
-  document.getElementById('blockDateStart').value=today;
-  document.getElementById('blockDateEnd').value=today;
+  blockSelectedDates=new Set();
+  blockCalYear=new Date().getFullYear();
+  blockCalMonth=new Date().getMonth();
   document.querySelectorAll('input[name="blockPeriod"]').forEach(i=>i.checked=false);
   document.getElementById('blockReason').value='';
   renderBlockReasonBtns();
   renderBlockVehicleCheckboxes();
+  renderBlockCalendar();
 }
 function closeBlockPanel(){
   document.getElementById('blockPanel').classList.remove('open');
@@ -379,6 +381,45 @@ function renderBlockReasonBtns(){
   el.innerHTML=blockReasons.map(r=>`<button class="reason-btn" onclick="setBlockReason('${r.reason}')">${r.reason}</button>`).join('');
 }
 function setBlockReason(reason){ document.getElementById('blockReason').value=reason; }
+
+function renderBlockCalendar(){
+  const el=document.getElementById('blockCalendar');
+  const wd=['日','一','二','三','四','五','六'];
+  const firstDay=new Date(blockCalYear,blockCalMonth,1).getDay();
+  const dim=new Date(blockCalYear,blockCalMonth+1,0).getDate();
+  const today=new Date();
+  let html=`<div class="bcal-header">
+    <button class="bcal-nav" id="blockCalPrev">&#8592;</button>
+    <span class="bcal-title">${blockCalYear}年${blockCalMonth+1}月</span>
+    <button class="bcal-nav" id="blockCalNext">&#8594;</button>
+  </div>
+  <div class="bcal-grid">
+    ${wd.map(d=>`<div class="bcal-wd">${d}</div>`).join('')}`;
+  for(let i=0;i<firstDay;i++) html+=`<div class="bcal-day empty"></div>`;
+  for(let d=1;d<=dim;d++){
+    const ds=`${blockCalYear}-${String(blockCalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isPast=new Date(blockCalYear,blockCalMonth,d)<new Date(today.getFullYear(),today.getMonth(),today.getDate());
+    const sel=blockSelectedDates.has(ds);
+    html+=`<div class="bcal-day${isPast?' past':''}${sel?' selected':''}" data-date="${ds}">${d}</div>`;
+  }
+  html+=`</div>`;
+  if(blockSelectedDates.size>0){
+    const sorted=[...blockSelectedDates].sort();
+    html+=`<div class="bcal-selected-list">已選：${sorted.map(d=>{ const [,m,day]=d.split('-'); return `${parseInt(m)}/${parseInt(day)}`; }).join('、')}</div>`;
+  }
+  el.innerHTML=html;
+  el.querySelectorAll('.bcal-day:not(.empty):not(.past)').forEach(cell=>{
+    cell.addEventListener('click',()=>{
+      const ds=cell.dataset.date;
+      if(blockSelectedDates.has(ds)) blockSelectedDates.delete(ds);
+      else blockSelectedDates.add(ds);
+      renderBlockCalendar();
+    });
+  });
+  document.getElementById('blockCalPrev').addEventListener('click',()=>{ blockCalMonth--; if(blockCalMonth<0){blockCalMonth=11;blockCalYear--;} renderBlockCalendar(); });
+  document.getElementById('blockCalNext').addEventListener('click',()=>{ blockCalMonth++; if(blockCalMonth>11){blockCalMonth=0;blockCalYear++;} renderBlockCalendar(); });
+}
+
 function renderBlockVehicleCheckboxes(){
   const el=document.getElementById('blockVehicleList');
   el.innerHTML=`<div class="period-group-section"><div class="period-full-row">
@@ -390,43 +431,25 @@ function renderBlockVehicleCheckboxes(){
   document.getElementById('blockAllVehicles').addEventListener('change',e=>{
     document.querySelectorAll('.block-vehicle-cb').forEach(cb=>cb.checked=e.target.checked);
   });
-  // 整天互斥
   document.querySelectorAll('input[name="blockPeriod"]').forEach(input=>{
     input.addEventListener('change',()=>{
-      if(input.value==='full'&&input.checked){
-        document.querySelectorAll('input[name="blockPeriod"]').forEach(o=>{ if(o.value!=='full') o.checked=false; });
-      } else if(input.value!=='full'&&input.checked){
-        const fi=document.querySelector('input[name="blockPeriod"][value="full"]');
-        if(fi) fi.checked=false;
-      }
+      if(input.value==='full'&&input.checked) document.querySelectorAll('input[name="blockPeriod"]').forEach(o=>{ if(o.value!=='full') o.checked=false; });
+      else if(input.value!=='full'&&input.checked){ const fi=document.querySelector('input[name="blockPeriod"][value="full"]'); if(fi) fi.checked=false; }
     });
   });
 }
 
-// 取得日期範圍內所有日期
-function getDateRange(startStr, endStr){
-  const dates=[];
-  const start=new Date(startStr), end=new Date(endStr);
-  for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)){
-    dates.push(d.toISOString().split('T')[0]);
-  }
-  return dates;
-}
-
 async function submitBlock(){
-  const dateStart=document.getElementById('blockDateStart').value;
-  const dateEnd=document.getElementById('blockDateEnd').value;
   const periods=[...document.querySelectorAll('input[name="blockPeriod"]:checked')].map(i=>i.value);
   const reason=document.getElementById('blockReason').value.trim();
   const selectedV=[...document.querySelectorAll('.block-vehicle-cb:checked')].map(cb=>cb.value);
-  if(!dateStart||!dateEnd){ showToast('請選擇日期','error'); return; }
-  if(dateStart>dateEnd){ showToast('結束日期不得早於開始日期','error'); return; }
+  const dates=[...blockSelectedDates];
+  if(!dates.length){ showToast('請在月曆選擇日期','error'); return; }
   if(!periods.length){ showToast('請選擇封鎖時段','error'); return; }
   if(!selectedV.length){ showToast('請選擇車輛','error'); return; }
   if(reason&&!blockReasons.find(r=>r.reason===reason)){ await db.from('block_reasons').insert({reason}); await loadBlockReasons(); }
   const btn=document.getElementById('submitBlockBtn');
   btn.disabled=true; btn.textContent='處理中...';
-  const dates=getDateRange(dateStart,dateEnd);
   const inserts=[];
   dates.forEach(date=>{ selectedV.forEach(vid=>{ periods.forEach(period=>{ inserts.push({vehicle_id:vid,date,period,reason:reason||null}); }); }); });
   const { error }=await db.from('blocked_slots').insert(inserts);
@@ -438,15 +461,8 @@ async function submitBlock(){
 }
 
 // 解除封鎖
-function openUnblockPanel(){
-  document.getElementById('unblockPanel').classList.add('open');
-  document.getElementById('unblockPanelOverlay').classList.add('open');
-  renderUnblockList();
-}
-function closeUnblockPanel(){
-  document.getElementById('unblockPanel').classList.remove('open');
-  document.getElementById('unblockPanelOverlay').classList.remove('open');
-}
+function openUnblockPanel(){ document.getElementById('unblockPanel').classList.add('open'); document.getElementById('unblockPanelOverlay').classList.add('open'); renderUnblockList(); }
+function closeUnblockPanel(){ document.getElementById('unblockPanel').classList.remove('open'); document.getElementById('unblockPanelOverlay').classList.remove('open'); }
 async function renderUnblockList(){
   const el=document.getElementById('unblockList');
   el.innerHTML='<div class="empty-state">載入中...</div>';
@@ -477,19 +493,11 @@ async function renderUnblockList(){
 }
 
 // 匯出
-function openExportPanel(){
-  document.getElementById('exportPanel').classList.add('open');
-  document.getElementById('exportPanelOverlay').classList.add('open');
-  renderExportMonths();
-}
-function closeExportPanel(){
-  document.getElementById('exportPanel').classList.remove('open');
-  document.getElementById('exportPanelOverlay').classList.remove('open');
-}
+function openExportPanel(){ document.getElementById('exportPanel').classList.add('open'); document.getElementById('exportPanelOverlay').classList.add('open'); renderExportMonths(); }
+function closeExportPanel(){ document.getElementById('exportPanel').classList.remove('open'); document.getElementById('exportPanelOverlay').classList.remove('open'); }
 function renderExportMonths(){
   const el=document.getElementById('exportMonthList');
-  const now=new Date();
-  const months=[];
+  const now=new Date(); const months=[];
   for(let i=0;i<12;i++){ const d=new Date(now.getFullYear(),now.getMonth()-i,1); months.push({year:d.getFullYear(),month:d.getMonth()+1}); }
   el.innerHTML=months.map(m=>`<label class="period-opt"><input type="checkbox" class="export-month-cb" value="${m.year}-${String(m.month).padStart(2,'0')}"><span>${m.year}年${m.month}月</span></label>`).join('');
   document.getElementById('exportSelectAll').onclick=()=>{ document.querySelectorAll('.export-month-cb').forEach(cb=>cb.checked=true); };
@@ -498,8 +506,7 @@ function renderExportMonths(){
 async function submitExport(){
   const selected=[...document.querySelectorAll('.export-month-cb:checked')].map(cb=>cb.value);
   if(!selected.length){ showToast('請選擇匯出月份','error'); return; }
-  const ids=vehicles.map(v=>v.id);
-  const allData=[];
+  const ids=vehicles.map(v=>v.id); const allData=[];
   for(const ym of selected){
     const [y,m]=ym.split('-');
     const start=`${y}-${m}-01`;
@@ -511,11 +518,7 @@ async function submitExport(){
   const merged=mergeBookings(allData);
   const wd=['日','一','二','三','四','五','六'];
   const rows=[['日期','星期','車牌','時段','姓名','用途','登記時間']];
-  merged.forEach(b=>{
-    const dow=wd[new Date(b.date).getDay()];
-    const time=b.created_at?formatDateTime24(b.created_at):'';
-    rows.push([b.date,dow,b.vehicles?.plate||'',b._displayLabel||periodLabel(b.period),b.user_name,b.purpose,time]);
-  });
+  merged.forEach(b=>{ const dow=wd[new Date(b.date).getDay()]; const time=b.created_at?formatDateTime24(b.created_at):''; rows.push([b.date,dow,b.vehicles?.plate||'',b._displayLabel||periodLabel(b.period),b.user_name,b.purpose,time]); });
   const csv='\uFEFF'+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
