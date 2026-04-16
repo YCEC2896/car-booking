@@ -240,14 +240,14 @@ function renderVehicleDetail(dateStr,vehicleId){
       <div class="form-title">新增預約</div>
       <div class="form-group">
         <label>員工編號</label>
-        <input type="text" class="form-input" id="empId" placeholder="請輸入員工編號">
+        <input type="text" class="form-input" id="empId" placeholder="請輸入員工編號（3碼）">
         <span class="form-sub-hint">請輸入3碼編號</span>
       </div>
       <div class="form-group">
         <label>姓名</label>
         <input type="text" class="form-input" id="userName" placeholder="查詢後自動帶入" readonly>
       </div>
-      <div class="form-group"><label>用途 / 專案名</label><input type="text" class="form-input" id="userPurpose" placeholder="請輸入用途或專案名稱"></div>
+      <div class="form-group"><label>事由 / 專案</label><input type="text" class="form-input" id="userPurpose" placeholder="請輸入事由或專案名稱"></div>
       <div class="form-group">
         <label>時段 <span class="form-hint">跨時段需分別勾選</span></label>
         ${periodOptionsHtml}
