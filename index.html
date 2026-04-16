@@ -10,7 +10,6 @@
 </head>
 <body>
 
-  <!-- Header -->
   <header class="header">
     <div class="header-inner">
       <div class="logo">
@@ -21,7 +20,7 @@
     </div>
   </header>
 
-  <!-- 管理員功能列（登入後顯示）-->
+  <!-- 管理員功能列 -->
   <div class="admin-bar" id="adminBar" style="display:none">
     <div class="admin-bar-inner">
       <button class="admin-bar-btn" id="blockBtn">🔒 封鎖時段</button>
@@ -53,27 +52,25 @@
     <div class="panel-body">
       <div class="form-group">
         <label>日期</label>
-        <input type="date" class="form-input" id="blockDate">
+        <input type="date" class="form-input" id="blockDate" min="2024-01-01" max="2099-12-31">
       </div>
       <div class="form-group">
         <label>封鎖時段</label>
-        <div class="period-options period-checkbox" id="blockPeriodOptions">
-          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="full"> <span>整天</span></label>
-          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="am1"> <span>08:00–10:00</span></label>
-          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="am2"> <span>10:00–12:30</span></label>
-          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="pm1"> <span>12:30–15:00</span></label>
-          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="pm2"> <span>15:00–18:00</span></label>
+        <div class="period-options period-checkbox">
+          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="full"><span>整天</span></label>
+          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="am1"><span>08:00–10:00</span></label>
+          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="am2"><span>10:00–12:30</span></label>
+          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="pm1"><span>12:30–15:00</span></label>
+          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="pm2"><span>15:00–18:00</span></label>
         </div>
       </div>
       <div class="form-group">
-        <label>車輛</label>
+        <label>車輛（可複選）</label>
         <div class="period-options period-checkbox" id="blockVehicleList"></div>
       </div>
       <div class="form-group">
         <label>原因</label>
-        <div class="reason-btns">
-          <button class="reason-btn" onclick="setBlockReason('車輛保養')">車輛保養</button>
-        </div>
+        <div class="reason-btns"><button class="reason-btn" onclick="setBlockReason('車輛保養')">車輛保養</button></div>
         <input type="text" class="form-input" id="blockReason" placeholder="輸入或選擇原因（選填）" style="margin-top:6px">
       </div>
       <button class="btn btn-danger btn-block" id="submitBlockBtn">確認封鎖</button>
@@ -90,16 +87,33 @@
     <div class="panel-body">
       <div class="form-group">
         <label>選擇月份（可複選）</label>
-        <div class="period-options period-checkbox export-month-grid" id="exportMonthList"></div>
+        <div class="period-options period-checkbox" id="exportMonthList"></div>
       </div>
       <button class="btn btn-primary btn-block" id="submitExportBtn">匯出 CSV</button>
     </div>
   </div>
 
+  <!-- 車輛管理面板 -->
+  <div class="panel-overlay" id="vehiclePanelOverlay"></div>
+  <div class="panel" id="vehiclePanel">
+    <div class="panel-header">
+      <div class="panel-title">🚗 管理車輛</div>
+      <button class="sidebar-close" id="vehiclePanelClose">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="vehiclePanelList" class="mgmt-list"></div>
+      <div class="form-group">
+        <label>新增車輛</label>
+        <div class="emp-row">
+          <input type="text" class="form-input" id="newVehiclePlate" placeholder="車牌號碼（例：ABC-1234）">
+          <button class="btn btn-primary btn-sm" id="addVehicleBtn">新增</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 主內容 -->
   <main class="main">
-
-    <!-- 月曆 -->
     <section class="calendar-section">
       <div class="calendar-header">
         <button class="nav-btn" id="prevMonth">&#8592;</button>
@@ -108,30 +122,15 @@
       </div>
       <div class="calendar-grid" id="calendarGrid"></div>
       <div class="legend">
-        <span class="legend-item"><span class="dot dot-available"></span>可借用</span>
-        <span class="legend-item"><span class="dot dot-partial"></span>部分已借</span>
-        <span class="legend-item"><span class="dot dot-full"></span>已借滿</span>
-        <span class="legend-item"><span class="dot dot-blocked"></span>封鎖</span>
+        <span class="legend-item"><span class="dot dot-available"></span>有空車</span>
+        <span class="legend-item"><span class="dot dot-partial"></span>零星時段</span>
+        <span class="legend-item"><span class="dot dot-full"></span>無空車</span>
       </div>
     </section>
-
-    <!-- 車輛管理（管理員限定）-->
-    <section id="vehicleMgmt" style="display:none">
-      <div class="section-label">車輛管理</div>
-      <div id="vehicleMgmtList" class="mgmt-list"></div>
-      <div class="mgmt-add">
-        <input type="text" class="form-input" id="newVehicleName" placeholder="車輛名稱（例：新北一號）">
-        <input type="text" class="form-input" id="newVehiclePlate" placeholder="車牌（例：ABC-1234）">
-        <button class="btn btn-primary" id="addVehicleBtn">新增</button>
-      </div>
-    </section>
-
-    <!-- 登記紀錄 -->
     <section class="log-section">
       <div class="section-label">登記紀錄</div>
       <div class="booking-log" id="bookingLog"></div>
     </section>
-
   </main>
 
   <!-- 側邊欄 -->
@@ -145,7 +144,6 @@
   </aside>
 
   <div class="toast" id="toast"></div>
-
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="app.js"></script>
 </body>

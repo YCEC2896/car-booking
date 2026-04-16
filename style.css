@@ -195,3 +195,8 @@ body { font-family: 'Noto Sans TC', sans-serif; background: var(--bg); color: va
   .mgmt-add { flex-direction: column; }
   .log-row1 { gap: 6px; }
 }
+
+/* ===== 新增樣式 ===== */
+.block-badge { font-size: 10px; background: rgba(124,92,219,0.2); color: var(--blocked); padding: 2px 7px; border-radius: 99px; margin-top: 3px; display: inline-block; }
+.vdh-plate { font-family: 'DM Mono', monospace; font-size: 15px; font-weight: 700; }
+.mgmt-plate { font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 500; flex: 1; }
