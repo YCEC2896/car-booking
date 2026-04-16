@@ -12,9 +12,14 @@
 
   <header class="header">
     <div class="header-inner">
-      <div class="logo">
-        <span class="logo-icon">🚗</span>
-        <span class="logo-text" id="currentOfficeName"></span>
+      <div class="header-left">
+        <div class="header-title-block">
+          <div class="header-system-name">公務車借用系統</div>
+          <div class="logo">
+            <span class="logo-icon">🚗</span>
+            <span class="logo-text" id="currentOfficeName"></span>
+          </div>
+        </div>
       </div>
       <button class="admin-btn" id="adminBtn">管理員入口</button>
     </div>
@@ -52,32 +57,40 @@
     </div>
     <div class="panel-body">
       <div class="form-group">
-        <label>日期</label>
-        <input type="date" class="form-input" id="blockDate">
+        <label>日期範圍</label>
+        <div class="date-range-row">
+          <input type="date" class="form-input" id="blockDateStart">
+          <span class="date-range-label">至</span>
+          <input type="date" class="form-input" id="blockDateEnd">
+        </div>
+        <div style="font-size:11px;color:var(--text2);margin-top:4px">單天請填相同日期</div>
       </div>
       <div class="form-group">
-        <label>封鎖時段</label>
+        <label>封鎖時段 <span class="form-hint">跨時段需分別勾選</span></label>
         <div class="period-group">
-          <div class="period-group-row">
-            <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="full"><span>整天</span></label>
+          <div class="period-group-section">
+            <div class="period-full-row">
+              <label class="period-opt"><input type="checkbox" name="blockPeriod" value="full"><span>整天</span></label>
+            </div>
           </div>
-          <div class="period-group-divider"></div>
-          <div class="period-group-row period-sub">
-            <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="am1"><span>08:00–10:00</span></label>
-            <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="am2"><span>10:00–12:30</span></label>
-            <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="pm1"><span>12:30–15:00</span></label>
-            <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="pm2"><span>15:00–18:00</span></label>
+          <div class="period-group-section">
+            <div class="period-sub">
+              <label class="period-opt"><input type="checkbox" name="blockPeriod" value="am1"><span>08:00–10:00</span></label>
+              <label class="period-opt"><input type="checkbox" name="blockPeriod" value="am2"><span>10:00–12:30</span></label>
+              <label class="period-opt"><input type="checkbox" name="blockPeriod" value="pm1"><span>12:30–15:00</span></label>
+              <label class="period-opt"><input type="checkbox" name="blockPeriod" value="pm2"><span>15:00–18:00</span></label>
+            </div>
           </div>
         </div>
       </div>
       <div class="form-group">
         <label>車輛（可複選）</label>
-        <div id="blockVehicleList"></div>
+        <div class="period-group" id="blockVehicleList"></div>
       </div>
       <div class="form-group">
         <label>原因</label>
         <div class="reason-btns" id="blockReasonBtns"></div>
-        <input type="text" class="form-input" id="blockReason" placeholder="輸入或選擇原因（選填）" style="margin-top:6px">
+        <input type="text" class="form-input" id="blockReason" placeholder="輸入或選擇原因（選填）" style="margin-top:8px">
       </div>
       <button class="btn btn-danger btn-block" id="submitBlockBtn">確認封鎖</button>
     </div>
@@ -105,11 +118,11 @@
     <div class="panel-body">
       <div class="form-group">
         <label>選擇月份</label>
-        <div class="export-controls">
+        <div class="export-top-row">
           <button class="btn btn-ghost btn-sm" id="exportSelectAll">全選</button>
           <button class="btn btn-ghost btn-sm" id="exportSelectNone">取消選擇</button>
         </div>
-        <div class="period-options period-checkbox" id="exportMonthList" style="margin-top:10px"></div>
+        <div class="export-month-grid" id="exportMonthList"></div>
       </div>
       <button class="btn btn-primary btn-block" id="submitExportBtn">匯出 CSV</button>
     </div>
