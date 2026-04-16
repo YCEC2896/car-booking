@@ -20,12 +20,13 @@
     </div>
   </header>
 
-  <!-- 管理員功能列 -->
   <div class="admin-bar" id="adminBar" style="display:none">
     <div class="admin-bar-inner">
       <button class="admin-bar-btn" id="blockBtn">🔒 封鎖時段</button>
+      <button class="admin-bar-btn" id="unblockBtn">🔓 解除封鎖</button>
       <button class="admin-bar-btn" id="exportBtn">📊 匯出紀錄</button>
       <button class="admin-bar-btn" id="vehicleMgmtBtn">🚗 管理車輛</button>
+      <button class="admin-bar-btn" id="reasonMgmtBtn">📝 管理原因</button>
     </div>
   </div>
 
@@ -52,28 +53,45 @@
     <div class="panel-body">
       <div class="form-group">
         <label>日期</label>
-        <input type="date" class="form-input" id="blockDate" min="2024-01-01" max="2099-12-31">
+        <input type="date" class="form-input" id="blockDate">
       </div>
       <div class="form-group">
         <label>封鎖時段</label>
-        <div class="period-options period-checkbox">
-          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="full"><span>整天</span></label>
-          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="am1"><span>08:00–10:00</span></label>
-          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="am2"><span>10:00–12:30</span></label>
-          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="pm1"><span>12:30–15:00</span></label>
-          <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="pm2"><span>15:00–18:00</span></label>
+        <div class="period-group">
+          <div class="period-group-row">
+            <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="full"><span>整天</span></label>
+          </div>
+          <div class="period-group-divider"></div>
+          <div class="period-group-row period-sub">
+            <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="am1"><span>08:00–10:00</span></label>
+            <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="am2"><span>10:00–12:30</span></label>
+            <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="pm1"><span>12:30–15:00</span></label>
+            <label class="period-opt checkbox-opt"><input type="radio" name="blockPeriod" value="pm2"><span>15:00–18:00</span></label>
+          </div>
         </div>
       </div>
       <div class="form-group">
         <label>車輛（可複選）</label>
-        <div class="period-options period-checkbox" id="blockVehicleList"></div>
+        <div id="blockVehicleList"></div>
       </div>
       <div class="form-group">
         <label>原因</label>
-        <div class="reason-btns"><button class="reason-btn" onclick="setBlockReason('車輛保養')">車輛保養</button></div>
+        <div class="reason-btns" id="blockReasonBtns"></div>
         <input type="text" class="form-input" id="blockReason" placeholder="輸入或選擇原因（選填）" style="margin-top:6px">
       </div>
       <button class="btn btn-danger btn-block" id="submitBlockBtn">確認封鎖</button>
+    </div>
+  </div>
+
+  <!-- 解除封鎖面板 -->
+  <div class="panel-overlay" id="unblockPanelOverlay"></div>
+  <div class="panel" id="unblockPanel">
+    <div class="panel-header">
+      <div class="panel-title">🔓 解除封鎖</div>
+      <button class="sidebar-close" id="unblockPanelClose">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="unblockList" class="mgmt-list"></div>
     </div>
   </div>
 
@@ -86,8 +104,12 @@
     </div>
     <div class="panel-body">
       <div class="form-group">
-        <label>選擇月份（可複選）</label>
-        <div class="period-options period-checkbox" id="exportMonthList"></div>
+        <label>選擇月份</label>
+        <div class="export-controls">
+          <button class="btn btn-ghost btn-sm" id="exportSelectAll">全選</button>
+          <button class="btn btn-ghost btn-sm" id="exportSelectNone">取消選擇</button>
+        </div>
+        <div class="period-options period-checkbox" id="exportMonthList" style="margin-top:10px"></div>
       </div>
       <button class="btn btn-primary btn-block" id="submitExportBtn">匯出 CSV</button>
     </div>
@@ -107,6 +129,25 @@
         <div class="emp-row">
           <input type="text" class="form-input" id="newVehiclePlate" placeholder="車牌號碼（例：ABC-1234）">
           <button class="btn btn-primary btn-sm" id="addVehicleBtn">新增</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 原因管理面板 -->
+  <div class="panel-overlay" id="reasonPanelOverlay"></div>
+  <div class="panel" id="reasonPanel">
+    <div class="panel-header">
+      <div class="panel-title">📝 管理封鎖原因</div>
+      <button class="sidebar-close" id="reasonPanelClose">✕</button>
+    </div>
+    <div class="panel-body">
+      <div id="reasonList" class="mgmt-list"></div>
+      <div class="form-group">
+        <label>新增原因</label>
+        <div class="emp-row">
+          <input type="text" class="form-input" id="newReason" placeholder="輸入新原因">
+          <button class="btn btn-primary btn-sm" id="addReasonBtn">新增</button>
         </div>
       </div>
     </div>

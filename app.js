@@ -6,18 +6,16 @@ const PASSWORDS = { admin: 'super888' };
 const FIXED_OFFICE_NAME = '新北';
 
 const PERIODS = [
-  { value: 'full', label: '整天',       start: '08:00', end: '18:00' },
+  { value: 'full', label: '整天',        start: '08:00', end: '18:00' },
   { value: 'am1',  label: '08:00–10:00', start: '08:00', end: '10:00' },
   { value: 'am2',  label: '10:00–12:30', start: '10:00', end: '12:30' },
   { value: 'pm1',  label: '12:30–15:00', start: '12:30', end: '15:00' },
   { value: 'pm2',  label: '15:00–18:00', start: '15:00', end: '18:00' },
 ];
 
-const BLOCK_REASONS = ['車輛保養'];
-
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-let vehicles = [], employees = [];
+let vehicles = [], employees = [], blockReasons = [];
 let bookings = {}, blockedSlots = {}, allBookings = [];
 let selectedOfficeId = null;
 let selectedDate = null, selectedVehicleIdInSidebar = null;
@@ -27,9 +25,8 @@ let adminLevel = null, realtimeChannel = null;
 // ===== 初始化 =====
 async function init() {
   await loadFixedOffice();
-  await loadEmployees();
+  await Promise.all([loadEmployees(), loadBlockReasons(), loadVehicles()]);
   setupEventListeners();
-  await loadVehicles();
   await loadMonthData();
   await loadAllBookings();
   subscribeRealtime();
@@ -39,12 +36,14 @@ async function loadFixedOffice() {
   const { data } = await db.from('offices').select('*').eq('name', FIXED_OFFICE_NAME).single();
   if (data) { selectedOfficeId = data.id; document.getElementById('currentOfficeName').textContent = data.name; }
 }
-
 async function loadEmployees() {
   const { data } = await db.from('employees').select('*');
   employees = data || [];
 }
-
+async function loadBlockReasons() {
+  const { data } = await db.from('block_reasons').select('*').order('reason');
+  blockReasons = data || [];
+}
 async function loadVehicles() {
   const { data } = await db.from('vehicles').select('*').eq('office_id', selectedOfficeId).order('plate');
   vehicles = data || [];
@@ -80,6 +79,7 @@ function subscribeRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, () => { loadMonthData(); loadAllBookings(); })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'blocked_slots' }, () => { loadMonthData(); })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicles' }, () => { loadVehicles().then(() => { loadMonthData(); loadAllBookings(); }); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'block_reasons' }, () => { loadBlockReasons(); })
     .subscribe();
 }
 
@@ -91,47 +91,27 @@ function rangesOverlap(a, b) { return a.s < b.e && a.e > b.s; }
 function mergeRanges(ranges) {
   if (!ranges.length) return [];
   const s = [...ranges].sort((a,b) => a.s-b.s);
-  const m = [s[0]];
+  const m = [{ ...s[0] }];
   for (let i=1; i<s.length; i++) { const l=m[m.length-1]; if(s[i].s<=l.e) l.e=Math.max(l.e,s[i].e); else m.push({...s[i]}); }
   return m;
 }
 function minutesToTime(m) { return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`; }
+function periodLabel(v) { if(v==='full') return '整天'; const p=getPeriod(v); return p?p.label:v; }
 
-function periodLabel(v) {
-  if (v === 'full') return '整天';
-  const p = getPeriod(v);
-  return p ? p.label : v;
-}
-
-// ===== 燈號判斷 =====
 const DAY_START = toMinutes('08:00');
 const DAY_END   = toMinutes('18:00');
-const DAY_TOTAL = DAY_END - DAY_START; // 600分鐘
+const DAY_TOTAL = DAY_END - DAY_START;
 
-// 單一車輛：計算可用分鐘數
 function vehicleAvailableMinutes(dayB, dayBl) {
-  const ranges = [...dayB, ...dayBl].map(i => periodToRange(i.period)).filter(Boolean);
+  const ranges = [...dayB,...dayBl].map(i=>periodToRange(i.period)).filter(Boolean);
   const merged = mergeRanges(ranges);
-  const covered = merged.reduce((s, r) => s + (Math.min(r.e, DAY_END) - Math.max(r.s, DAY_START)), 0);
+  const covered = merged.reduce((s,r)=>s+(Math.min(r.e,DAY_END)-Math.max(r.s,DAY_START)),0);
   return DAY_TOTAL - Math.max(0, covered);
 }
 
-// 判斷整天是否完全空閒
-function vehicleIsFullyFree(dayB, dayBl) {
-  return vehicleAvailableMinutes(dayB, dayBl) >= DAY_TOTAL;
-}
-
-// 整體狀態：有任一車完全空閒→綠，否則有任一車有部分空閒→黃，全滿→紅
-function getDayOverallStatus(dateStr) {
-  if (!vehicles.length) return 'available';
-  const statuses = vehicles.map(v => {
-    const vb = (bookings[v.id]||[]).filter(b=>b.date===dateStr);
-    const vbl = (blockedSlots[v.id]||[]).filter(b=>b.date===dateStr);
-    return getVehicleDayStatus(vb, vbl);
-  });
-  if (statuses.some(s => s === 'available')) return 'available';
-  if (statuses.some(s => s === 'partial')) return 'partial';
-  return 'full';
+// 整天封鎖：有 full period 的封鎖
+function vehicleIsFullDayBlocked(dayBl) {
+  return dayBl.some(b => b.period === 'full');
 }
 
 function getVehicleDayStatus(dayB, dayBl) {
@@ -141,19 +121,26 @@ function getVehicleDayStatus(dayB, dayBl) {
   return 'full';
 }
 
-// 判斷是否封鎖（用於側邊欄顯示封鎖標籤）
-function isVehicleBlocked(dayBl) {
-  return dayBl.length > 0;
+function getDayOverallStatus(dateStr) {
+  if (!vehicles.length) return 'available';
+  const statuses = vehicles.map(v => {
+    const vb = (bookings[v.id]||[]).filter(b=>b.date===dateStr);
+    const vbl = (blockedSlots[v.id]||[]).filter(b=>b.date===dateStr);
+    return getVehicleDayStatus(vb, vbl);
+  });
+  if (statuses.some(s=>s==='available')) return 'available';
+  if (statuses.some(s=>s==='partial')) return 'partial';
+  return 'full';
 }
 
 // ===== 月曆 =====
 function renderCalendar() {
-  document.getElementById('calendarTitle').textContent = `${currentYear} 年 ${currentMonth + 1} 月`;
+  document.getElementById('calendarTitle').textContent = `${currentYear} 年 ${currentMonth+1} 月`;
   const grid = document.getElementById('calendarGrid');
   const wd = ['日','一','二','三','四','五','六'];
   let html = wd.map(d=>`<div class="calendar-weekday">${d}</div>`).join('');
-  const firstDay = new Date(currentYear, currentMonth, 1).getDay();
-  const dim = new Date(currentYear, currentMonth+1, 0).getDate();
+  const firstDay = new Date(currentYear,currentMonth,1).getDay();
+  const dim = new Date(currentYear,currentMonth+1,0).getDate();
   const today = new Date();
   for (let i=0;i<firstDay;i++) html+=`<div class="calendar-day empty"></div>`;
   for (let d=1;d<=dim;d++) {
@@ -173,21 +160,19 @@ function renderCalendar() {
 
 // ===== 側邊欄 =====
 function openSidebar(dateStr) {
-  selectedDate = dateStr; selectedVehicleIdInSidebar = null;
-  const [y,m,d] = dateStr.split('-');
-  const dow = ['日','一','二','三','四','五','六'][new Date(dateStr).getDay()];
-  document.getElementById('sidebarDate').textContent = `${y}/${parseInt(m)}/${parseInt(d)}（${dow}）`;
+  selectedDate=dateStr; selectedVehicleIdInSidebar=null;
+  const [y,m,d]=dateStr.split('-');
+  const dow=['日','一','二','三','四','五','六'][new Date(dateStr).getDay()];
+  document.getElementById('sidebarDate').textContent=`${y}/${parseInt(m)}/${parseInt(d)}（${dow}）`;
   renderSidebar(dateStr);
   document.getElementById('sidebar').classList.add('open');
   document.getElementById('sidebarOverlay').classList.add('open');
 }
-
 function closeSidebar() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('sidebarOverlay').classList.remove('open');
-  selectedDate = null; selectedVehicleIdInSidebar = null;
+  selectedDate=null; selectedVehicleIdInSidebar=null;
 }
-
 function renderSidebar(dateStr) {
   if (!selectedVehicleIdInSidebar) renderVehicleList(dateStr);
   else renderVehicleDetail(dateStr, selectedVehicleIdInSidebar);
@@ -200,19 +185,32 @@ function renderVehicleList(dateStr) {
   vehicles.forEach(v => {
     const vb = (bookings[v.id]||[]).filter(b=>b.date===dateStr);
     const vbl = (blockedSlots[v.id]||[]).filter(b=>b.date===dateStr);
+    const isFullBlocked = vehicleIsFullDayBlocked(vbl);
     const status = getVehicleDayStatus(vb, vbl);
-    const hasBlock = isVehicleBlocked(vbl);
     const statusLabel = {available:'有空餘',partial:'零星時段',full:'無空車'}[status];
     const statusClass = {available:'status-available',partial:'status-partial',full:'status-full'}[status];
-    const blockBadge = hasBlock ? '<span class="block-badge">封鎖中</span>' : '';
-    html+=`<div class="vehicle-day-card ${statusClass}" data-vid="${v.id}">
-      <div class="vdc-info"><div class="vdc-plate">${v.plate}</div>${blockBadge}</div>
-      <div class="vdc-status">${statusLabel}</div>
-      <div class="vdc-arrow">›</div>
-    </div>`;
+
+    if (isFullBlocked) {
+      // 整天封鎖：顯示原因，不可點入
+      const reasons = vbl.filter(b=>b.period==='full').map(b=>b.reason).filter(Boolean);
+      const reasonText = reasons.length ? reasons.join('、') : '';
+      html+=`<div class="vehicle-day-card status-blocked no-entry" data-vid="${v.id}">
+        <div class="vdc-info">
+          <div class="vdc-plate">${v.plate}</div>
+          ${reasonText?`<div class="vdc-block-reason">${reasonText}</div>`:''}
+        </div>
+        <div class="vdc-status">封鎖中</div>
+      </div>`;
+    } else {
+      html+=`<div class="vehicle-day-card ${statusClass}" data-vid="${v.id}">
+        <div class="vdc-info"><div class="vdc-plate">${v.plate}</div></div>
+        <div class="vdc-status">${statusLabel}</div>
+        <div class="vdc-arrow">›</div>
+      </div>`;
+    }
   });
   body.innerHTML = html;
-  body.querySelectorAll('.vehicle-day-card').forEach(card=>{
+  body.querySelectorAll('.vehicle-day-card:not(.no-entry)').forEach(card=>{
     card.addEventListener('click',()=>{ selectedVehicleIdInSidebar=card.dataset.vid; renderVehicleDetail(dateStr,card.dataset.vid); });
   });
 }
@@ -226,16 +224,17 @@ function renderVehicleDetail(dateStr, vehicleId) {
 
   let recordsHtml = '';
   dayBlocked.forEach(bl=>{
+    const label = bl.reason ? bl.reason : '';
     recordsHtml+=`<div class="booking-item blocked-item">
       <div class="booking-info">
         <div class="booking-period">🔒 ${periodLabel(bl.period)}</div>
-        <div class="booking-name">${bl.reason||'（無說明）'}</div>
+        ${label?`<div class="booking-name">${label}</div>`:''}
       </div>
       ${adminLevel?`<button class="booking-delete" data-id="${bl.id}" data-type="blocked">✕</button>`:''}
     </div>`;
   });
   dayBookings.forEach(bk=>{
-    const timeStr = bk.created_at ? formatDateTime24(bk.created_at) : '';
+    const timeStr = bk.created_at?formatDateTime24(bk.created_at):'';
     recordsHtml+=`<div class="booking-item">
       <div class="booking-info">
         <div class="booking-period">${periodLabel(bk.period)}</div>
@@ -247,12 +246,8 @@ function renderVehicleDetail(dateStr, vehicleId) {
   });
   if (!recordsHtml) recordsHtml='<div class="empty-state">此日期尚無預約</div>';
 
-  const periodOptionsHtml = PERIODS.map(p=>{
-    const disabled = isConflictWithExisting(p.value, allItems);
-    return `<label class="period-opt checkbox-opt${disabled?' disabled':''}">
-      <input type="checkbox" name="period" value="${p.value}" ${disabled?'disabled':''}><span>${p.label}</span>
-    </label>`;
-  }).join('');
+  // 時段選項（整天與各時段分組）
+  const periodOptionsHtml = buildPeriodOptions(allItems, 'period', false);
 
   body.innerHTML=`
     <button class="back-to-list-btn" id="backToList">← 返回車輛列表</button>
@@ -262,27 +257,58 @@ function renderVehicleDetail(dateStr, vehicleId) {
       <div class="form-title">新增預約</div>
       <div class="form-group">
         <label>員工編號</label>
-        <div class="emp-row"><input type="text" class="form-input" id="empId" placeholder="輸入員工編號"><button class="btn btn-ghost btn-sm" id="lookupEmp">查詢</button></div>
+        <input type="text" class="form-input" id="empId" placeholder="輸入3碼，個位數與兩位數請補零（如：001）">
       </div>
-      <div class="form-group"><label>姓名</label><input type="text" class="form-input" id="userName" placeholder="請輸入姓名"></div>
+      <div class="form-group">
+        <label>姓名</label>
+        <input type="text" class="form-input" id="userName" placeholder="查詢員工編號後自動帶入" readonly style="background:var(--bg3);cursor:default;">
+      </div>
       <div class="form-group"><label>用途 / 專案名</label><input type="text" class="form-input" id="userPurpose" placeholder="請輸入用途或專案名稱"></div>
       <div class="form-group">
         <label>時段 <span class="form-hint">跨時段需分別勾選</span></label>
-        <div class="period-options period-checkbox">${periodOptionsHtml}</div>
+        ${periodOptionsHtml}
       </div>
       <button class="btn btn-primary btn-block" id="submitBooking">確認預約</button>
     </div>`;
 
   document.getElementById('backToList')?.addEventListener('click',()=>{ selectedVehicleIdInSidebar=null; renderVehicleList(dateStr); });
-  document.getElementById('lookupEmp')?.addEventListener('click', lookupEmployee);
-  document.getElementById('empId')?.addEventListener('keydown', e=>{ if(e.key==='Enter') lookupEmployee(); });
+  document.getElementById('empId')?.addEventListener('blur', lookupEmployee);
   document.getElementById('submitBooking')?.addEventListener('click', submitBooking);
   body.querySelectorAll('.booking-delete').forEach(btn=>{ btn.addEventListener('click',()=>deleteRecord(btn.dataset.id,btn.dataset.type)); });
+  setupPeriodMutualExclusion(body);
+}
 
-  body.querySelectorAll('input[name="period"]').forEach(input=>{
+// ===== 建立時段選項 HTML（整天與各時段分組）=====
+function buildPeriodOptions(existingItems, radioName, isRadio) {
+  const inputType = isRadio ? 'radio' : 'checkbox';
+  const fullP = PERIODS.find(p=>p.value==='full');
+  const subPs = PERIODS.filter(p=>p.value!=='full');
+  const fullDisabled = isConflictWithExisting('full', existingItems);
+  const fullHtml = `<label class="period-opt checkbox-opt${fullDisabled?' disabled':''}">
+    <input type="${inputType}" name="${radioName}" value="full" ${fullDisabled?'disabled':''}><span>${fullP.label}</span>
+  </label>`;
+  const subHtml = subPs.map(p=>{
+    const disabled = isConflictWithExisting(p.value, existingItems);
+    return `<label class="period-opt checkbox-opt${disabled?' disabled':''}">
+      <input type="${inputType}" name="${radioName}" value="${p.value}" ${disabled?'disabled':''}><span>${p.label}</span>
+    </label>`;
+  }).join('');
+  return `<div class="period-group">
+    <div class="period-group-row">${fullHtml}</div>
+    <div class="period-group-divider"></div>
+    <div class="period-group-row period-sub">${subHtml}</div>
+  </div>`;
+}
+
+function setupPeriodMutualExclusion(container) {
+  container.querySelectorAll('input[name="period"]').forEach(input=>{
     input.addEventListener('change',()=>{
-      if(input.value==='full'&&input.checked) body.querySelectorAll('input[name="period"]').forEach(o=>{ if(o.value!=='full') o.checked=false; });
-      else if(input.value!=='full'&&input.checked) { const fi=body.querySelector('input[name="period"][value="full"]'); if(fi) fi.checked=false; }
+      if (input.value==='full'&&input.checked) {
+        container.querySelectorAll('input[name="period"]').forEach(o=>{ if(o.value!=='full') o.checked=false; });
+      } else if (input.value!=='full'&&input.checked) {
+        const fi=container.querySelector('input[name="period"][value="full"]');
+        if (fi) fi.checked=false;
+      }
     });
   });
 }
@@ -290,17 +316,18 @@ function renderVehicleDetail(dateStr, vehicleId) {
 function isConflictWithExisting(periodValue, existingItems) {
   const newP = getPeriod(periodValue);
   if (!newP) return false;
-  const nr = { s: toMinutes(newP.start), e: toMinutes(newP.end) };
+  const nr = { s:toMinutes(newP.start), e:toMinutes(newP.end) };
   return existingItems.some(item=>{ const r=periodToRange(item.period); return r&&rangesOverlap(nr,r); });
 }
 
-// ===== 員工查詢 =====
+// ===== 員工查詢（blur 觸發）=====
 function lookupEmployee() {
   const id = document.getElementById('empId')?.value.trim();
   if (!id) return;
   const emp = employees.find(e=>e.employee_id===id);
-  if (emp) { document.getElementById('userName').value=emp.name; showToast(`找到：${emp.name}`,'success'); }
-  else showToast('找不到此員工編號','error');
+  const nameField = document.getElementById('userName');
+  if (emp) { if(nameField) nameField.value=emp.name; showToast(`找到：${emp.name}`,'success'); }
+  else { if(nameField) nameField.value=''; showToast('找不到此員工編號','error'); }
 }
 
 // ===== 新增預約 =====
@@ -309,20 +336,16 @@ async function submitBooking() {
   const userName = document.getElementById('userName')?.value.trim();
   const purpose = document.getElementById('userPurpose')?.value.trim();
   if (!selected.length) { showToast('請勾選時段','error'); return; }
-  if (!userName) { showToast('請輸入姓名','error'); return; }
+  if (!userName) { showToast('請先查詢員工編號','error'); return; }
   if (!purpose) { showToast('請輸入用途','error'); return; }
-
   const dayBookings = (bookings[selectedVehicleIdInSidebar]||[]).filter(b=>b.date===selectedDate);
   const dayBlocked = (blockedSlots[selectedVehicleIdInSidebar]||[]).filter(b=>b.date===selectedDate);
-  const conflict = selected.some(p=>isConflictWithExisting(p,[...dayBookings,...dayBlocked]));
-  if (conflict) { showToast('所選時段與現有預約衝突','error'); return; }
-
+  if (selected.some(p=>isConflictWithExisting(p,[...dayBookings,...dayBlocked]))) { showToast('所選時段與現有預約衝突','error'); return; }
   const btn = document.getElementById('submitBooking');
   btn.disabled=true; btn.textContent='處理中...';
-  const inserts = selected.map(p=>({ vehicle_id:selectedVehicleIdInSidebar, date:selectedDate, period:p, user_name:userName, purpose }));
-  const { error } = await db.from('bookings').insert(inserts);
+  const { error } = await db.from('bookings').insert(selected.map(p=>({ vehicle_id:selectedVehicleIdInSidebar, date:selectedDate, period:p, user_name:userName, purpose })));
   btn.disabled=false; btn.textContent='確認預約';
-  if (error) { showToast('預約失敗，請重試','error'); return; }
+  if (error) { showToast('預約失敗','error'); return; }
   showToast('預約成功！','success');
   await loadMonthData(); await loadAllBookings();
   renderVehicleDetail(selectedDate, selectedVehicleIdInSidebar);
@@ -330,8 +353,7 @@ async function submitBooking() {
 
 // ===== 刪除 =====
 async function deleteRecord(id, type) {
-  const table = type==='booking'?'bookings':'blocked_slots';
-  const { error } = await db.from(table).delete().eq('id',id);
+  const { error } = await db.from(type==='booking'?'bookings':'blocked_slots').delete().eq('id',id);
   if (error) { showToast('刪除失敗','error'); return; }
   showToast('已刪除','success');
   await loadMonthData(); await loadAllBookings();
@@ -339,79 +361,47 @@ async function deleteRecord(id, type) {
 }
 
 // ===== 登記紀錄彙整 =====
-function mergeBookings(rawBookings) {
-  // 依 date + vehicle_id + user_name + purpose 分組，再合併連續時段
+function mergeBookings(raw) {
   const groups = {};
-  rawBookings.forEach(b => {
-    const key = `${b.date}__${b.vehicle_id}__${b.user_name}__${b.purpose}`;
-    if (!groups[key]) groups[key] = [];
+  raw.forEach(b=>{
+    const key=`${b.date}__${b.vehicle_id}__${b.user_name}__${b.purpose}`;
+    if(!groups[key]) groups[key]=[];
     groups[key].push(b);
   });
-
-  const result = [];
-  Object.values(groups).forEach(items => {
-    // 取得每筆的時間範圍
-    const ranges = items.map(i => {
-      const r = periodToRange(i.period);
-      return r ? { ...r, item: i } : null;
-    }).filter(Boolean).sort((a,b) => a.s-b.s);
-
-    // 合併連續區間
-    const merged = [];
-    ranges.forEach(r => {
-      if (!merged.length || r.s > merged[merged.length-1].e) {
-        merged.push({ s: r.s, e: r.e, item: r.item });
-      } else {
-        merged[merged.length-1].e = Math.max(merged[merged.length-1].e, r.e);
-      }
-    });
-
-    // 每個合併區間產生一筆紀錄
-    merged.forEach(m => {
-      result.push({
-        ...m.item,
-        _displayLabel: `${minutesToTime(m.s)}–${minutesToTime(m.e)}`
-      });
-    });
+  const result=[];
+  Object.values(groups).forEach(items=>{
+    const ranges=items.map(i=>{ const r=periodToRange(i.period); return r?{...r,item:i}:null; }).filter(Boolean).sort((a,b)=>a.s-b.s);
+    const merged=[];
+    ranges.forEach(r=>{ if(!merged.length||r.s>merged[merged.length-1].e) merged.push({s:r.s,e:r.e,item:r.item}); else merged[merged.length-1].e=Math.max(merged[merged.length-1].e,r.e); });
+    merged.forEach(m=>result.push({...m.item,_displayLabel:`${minutesToTime(m.s)}–${minutesToTime(m.e)}`}));
   });
-
-  // 依 date desc, created_at desc 排序
-  result.sort((a,b) => {
-    if (b.date !== a.date) return b.date.localeCompare(a.date);
-    return new Date(b.created_at) - new Date(a.created_at);
-  });
+  result.sort((a,b)=>{ if(b.date!==a.date) return b.date.localeCompare(a.date); return new Date(b.created_at)-new Date(a.created_at); });
   return result;
 }
 
 function renderBookingLog() {
-  const el = document.getElementById('bookingLog');
-  if (!el) return;
-  if (!allBookings.length) { el.innerHTML='<div class="log-empty">尚無登記紀錄</div>'; return; }
-  const merged = mergeBookings(allBookings);
-  const wd = ['日','一','二','三','四','五','六'];
-  el.innerHTML = merged.map(b => {
-    const vehicle = b.vehicles||{};
-    const dow = wd[new Date(b.date).getDay()];
-    const timeStr = b.created_at ? formatDateTime24(b.created_at) : '';
-    const label = b._displayLabel || periodLabel(b.period);
+  const el=document.getElementById('bookingLog');
+  if(!el) return;
+  if(!allBookings.length){ el.innerHTML='<div class="log-empty">尚無登記紀錄</div>'; return; }
+  const merged=mergeBookings(allBookings);
+  const wd=['日','一','二','三','四','五','六'];
+  el.innerHTML=merged.map(b=>{
+    const vehicle=b.vehicles||{};
+    const dow=wd[new Date(b.date).getDay()];
+    const timeStr=b.created_at?formatDateTime24(b.created_at):'';
+    const label=b._displayLabel||periodLabel(b.period);
     return `<div class="log-item">
       <div class="log-left"><div class="log-date">${b.date}</div><div class="log-dow">（${dow}）</div></div>
       <div class="log-right">
-        <div class="log-row1">
-          <span class="log-name">${b.user_name}</span>
-          <span class="log-purpose">${b.purpose}</span>
-          <span class="log-period">${label}</span>
-          <span class="log-plate">${vehicle.plate||''}</span>
-        </div>
+        <div class="log-row1"><span class="log-name">${b.user_name}</span><span class="log-purpose">${b.purpose}</span><span class="log-period">${label}</span><span class="log-plate">${vehicle.plate||''}</span></div>
         <div class="log-row2">${timeStr} 登記</div>
       </div>
     </div>`;
   }).join('');
 }
 
-// ===== 時間格式（24小時）=====
 function formatDateTime24(isoStr) {
-  const d = new Date(isoStr);
+  const d=new Date(isoStr);
   return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
@@ -419,42 +409,96 @@ function formatDateTime24(isoStr) {
 function openBlockPanel() {
   document.getElementById('blockPanel').classList.add('open');
   document.getElementById('blockPanelOverlay').classList.add('open');
-  // 設定預設日期為今天
-  document.getElementById('blockDate').value = new Date().toISOString().split('T')[0];
+  document.getElementById('blockDate').value=new Date().toISOString().split('T')[0];
+  renderBlockReasonBtns();
   renderBlockVehicleCheckboxes();
+  // 重設時段選擇
+  document.querySelectorAll('input[name="blockPeriod"]').forEach(i=>i.checked=false);
+  document.getElementById('blockReason').value='';
 }
 function closeBlockPanel() {
   document.getElementById('blockPanel').classList.remove('open');
   document.getElementById('blockPanelOverlay').classList.remove('open');
 }
-function setBlockReason(reason) {
-  document.getElementById('blockReason').value = reason;
+function renderBlockReasonBtns() {
+  const el=document.getElementById('blockReasonBtns');
+  el.innerHTML=blockReasons.map(r=>`<button class="reason-btn" onclick="setBlockReason('${r.reason}')">${r.reason}</button>`).join('');
 }
+function setBlockReason(reason) { document.getElementById('blockReason').value=reason; }
 function renderBlockVehicleCheckboxes() {
-  const el = document.getElementById('blockVehicleList');
-  el.innerHTML = `<label class="period-opt checkbox-opt"><input type="checkbox" id="blockAllVehicles"><span>所有車輛</span></label>`
-    + vehicles.map(v=>`<label class="period-opt checkbox-opt"><input type="checkbox" class="block-vehicle-cb" value="${v.id}"><span>${v.plate}</span></label>`).join('');
-  document.getElementById('blockAllVehicles').addEventListener('change', e=>{
+  const el=document.getElementById('blockVehicleList');
+  el.innerHTML=`<div class="period-group-row all-row">
+    <label class="period-opt checkbox-opt"><input type="checkbox" id="blockAllVehicles"><span>所有車輛</span></label>
+  </div>
+  <div class="period-group-divider"></div>
+  <div class="period-group-row period-sub">`
+    +vehicles.map(v=>`<label class="period-opt checkbox-opt"><input type="checkbox" class="block-vehicle-cb" value="${v.id}"><span>${v.plate}</span></label>`).join('')
+  +`</div>`;
+  document.getElementById('blockAllVehicles').addEventListener('change',e=>{
     document.querySelectorAll('.block-vehicle-cb').forEach(cb=>cb.checked=e.target.checked);
   });
 }
 async function submitBlock() {
-  const date = document.getElementById('blockDate').value;
-  const period = document.querySelector('input[name="blockPeriod"]:checked')?.value;
-  const reason = document.getElementById('blockReason').value.trim();
-  const selectedV = [...document.querySelectorAll('.block-vehicle-cb:checked')].map(cb=>cb.value);
-  if (!date) { showToast('請選擇日期','error'); return; }
-  if (!period) { showToast('請選擇封鎖時段','error'); return; }
-  if (!selectedV.length) { showToast('請選擇車輛','error'); return; }
-  const btn = document.getElementById('submitBlockBtn');
+  const date=document.getElementById('blockDate').value;
+  const period=document.querySelector('input[name="blockPeriod"]:checked')?.value;
+  const reason=document.getElementById('blockReason').value.trim();
+  const selectedV=[...document.querySelectorAll('.block-vehicle-cb:checked')].map(cb=>cb.value);
+  if(!date){ showToast('請選擇日期','error'); return; }
+  if(!period){ showToast('請選擇封鎖時段','error'); return; }
+  if(!selectedV.length){ showToast('請選擇車輛','error'); return; }
+  // 若有新原因，儲存到 block_reasons
+  if(reason && !blockReasons.find(r=>r.reason===reason)) {
+    await db.from('block_reasons').insert({ reason });
+    await loadBlockReasons();
+  }
+  const btn=document.getElementById('submitBlockBtn');
   btn.disabled=true; btn.textContent='處理中...';
-  const inserts = selectedV.map(vid=>({ vehicle_id:vid, date, period, reason:reason||null }));
-  const { error } = await db.from('blocked_slots').insert(inserts);
+  const { error }=await db.from('blocked_slots').insert(selectedV.map(vid=>({ vehicle_id:vid, date, period, reason:reason||null })));
   btn.disabled=false; btn.textContent='確認封鎖';
-  if (error) { showToast('封鎖失敗','error'); return; }
+  if(error){ showToast('封鎖失敗','error'); return; }
   showToast('封鎖完成','success');
   closeBlockPanel();
   await loadMonthData();
+}
+
+// ===== 解除封鎖面板 =====
+function openUnblockPanel() {
+  document.getElementById('unblockPanel').classList.add('open');
+  document.getElementById('unblockPanelOverlay').classList.add('open');
+  renderUnblockList();
+}
+function closeUnblockPanel() {
+  document.getElementById('unblockPanel').classList.remove('open');
+  document.getElementById('unblockPanelOverlay').classList.remove('open');
+}
+async function renderUnblockList() {
+  const el=document.getElementById('unblockList');
+  el.innerHTML='<div class="empty-state">載入中...</div>';
+  const ids=vehicles.map(v=>v.id);
+  if(!ids.length){ el.innerHTML='<div class="empty-state">尚無車輛</div>'; return; }
+  const today=new Date().toISOString().split('T')[0];
+  const { data }=await db.from('blocked_slots').select('*, vehicles(plate)').in('vehicle_id',ids).gte('date',today).order('date').order('vehicle_id');
+  if(!data||!data.length){ el.innerHTML='<div class="empty-state">目前無封鎖紀錄</div>'; return; }
+  const wd=['日','一','二','三','四','五','六'];
+  el.innerHTML=data.map(bl=>{
+    const dow=wd[new Date(bl.date).getDay()];
+    return `<div class="mgmt-item">
+      <div class="mgmt-block-info">
+        <div class="mgmt-block-date">${bl.date}（${dow}）</div>
+        <div class="mgmt-block-detail">${bl.vehicles?.plate||''} · ${periodLabel(bl.period)}${bl.reason?` · ${bl.reason}`:''}</div>
+      </div>
+      <button class="mgmt-delete" data-id="${bl.id}">解除</button>
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.mgmt-delete').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      const { error }=await db.from('blocked_slots').delete().eq('id',btn.dataset.id);
+      if(error){ showToast('操作失敗','error'); return; }
+      showToast('已解除封鎖','success');
+      await loadMonthData();
+      renderUnblockList();
+    });
+  });
 }
 
 // ===== 匯出面板 =====
@@ -468,46 +512,46 @@ function closeExportPanel() {
   document.getElementById('exportPanelOverlay').classList.remove('open');
 }
 function renderExportMonths() {
-  const el = document.getElementById('exportMonthList');
-  const months = [];
-  const now = new Date();
-  for (let i=0; i<12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-    months.push({ year:d.getFullYear(), month:d.getMonth()+1 });
-  }
-  el.innerHTML = `<label class="period-opt checkbox-opt"><input type="checkbox" id="exportSelectAll"><span>全選</span></label>`
-    + months.map(m=>`<label class="period-opt checkbox-opt"><input type="checkbox" class="export-month-cb" value="${m.year}-${String(m.month).padStart(2,'0')}"><span>${m.year}年${m.month}月</span></label>`).join('');
-  document.getElementById('exportSelectAll').addEventListener('change', e=>{
-    document.querySelectorAll('.export-month-cb').forEach(cb=>cb.checked=e.target.checked);
+  const el=document.getElementById('exportMonthList');
+  const now=new Date();
+  const months=[];
+  for(let i=0;i<12;i++){ const d=new Date(now.getFullYear(),now.getMonth()-i,1); months.push({year:d.getFullYear(),month:d.getMonth()+1}); }
+  el.innerHTML=months.map(m=>`<label class="period-opt checkbox-opt">
+    <input type="checkbox" class="export-month-cb" value="${m.year}-${String(m.month).padStart(2,'0')}">
+    <span>${m.year}年${m.month}月</span>
+  </label>`).join('');
+  document.getElementById('exportSelectAll').addEventListener('click',()=>{
+    document.querySelectorAll('.export-month-cb').forEach(cb=>cb.checked=true);
+  });
+  document.getElementById('exportSelectNone').addEventListener('click',()=>{
+    document.querySelectorAll('.export-month-cb').forEach(cb=>cb.checked=false);
   });
 }
 async function submitExport() {
-  const selected = [...document.querySelectorAll('.export-month-cb:checked')].map(cb=>cb.value);
-  if (!selected.length) { showToast('請選擇匯出月份','error'); return; }
-  const ids = vehicles.map(v=>v.id);
-  const allData = [];
-  for (const ym of selected) {
-    const [y,m] = ym.split('-');
-    const start = `${y}-${m}-01`;
-    const end = new Date(parseInt(y),parseInt(m),0).toISOString().split('T')[0];
-    const { data } = await db.from('bookings').select('*, vehicles(plate)').in('vehicle_id',ids).gte('date',start).lte('date',end).order('date').order('created_at');
-    if (data) allData.push(...data);
+  const selected=[...document.querySelectorAll('.export-month-cb:checked')].map(cb=>cb.value);
+  if(!selected.length){ showToast('請選擇匯出月份','error'); return; }
+  const ids=vehicles.map(v=>v.id);
+  const allData=[];
+  for(const ym of selected){
+    const [y,m]=ym.split('-');
+    const start=`${y}-${m}-01`;
+    const end=new Date(parseInt(y),parseInt(m),0).toISOString().split('T')[0];
+    const { data }=await db.from('bookings').select('*, vehicles(plate)').in('vehicle_id',ids).gte('date',start).lte('date',end).order('date').order('created_at');
+    if(data) allData.push(...data);
   }
-  if (!allData.length) { showToast('所選期間無資料','error'); return; }
-  const merged = mergeBookings(allData);
-  const wd = ['日','一','二','三','四','五','六'];
-  const rows = [['日期','星期','車牌','時段','姓名','用途','登記時間']];
+  if(!allData.length){ showToast('所選期間無資料','error'); return; }
+  const merged=mergeBookings(allData);
+  const wd=['日','一','二','三','四','五','六'];
+  const rows=[['日期','星期','車牌','時段','姓名','用途','登記時間']];
   merged.forEach(b=>{
-    const dow = wd[new Date(b.date).getDay()];
-    const time = b.created_at ? formatDateTime24(b.created_at) : '';
-    const label = b._displayLabel || periodLabel(b.period);
-    rows.push([b.date, dow, b.vehicles?.plate||'', label, b.user_name, b.purpose, time]);
+    const dow=wd[new Date(b.date).getDay()];
+    const time=b.created_at?formatDateTime24(b.created_at):'';
+    rows.push([b.date,dow,b.vehicles?.plate||'',b._displayLabel||periodLabel(b.period),b.user_name,b.purpose,time]);
   });
-  const csv = '\uFEFF'+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href=url; a.download=`公務車紀錄_${FIXED_OFFICE_NAME}_${selected.join('_')}.csv`; a.click();
+  const csv='\uFEFF'+rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=`公務車紀錄_${FIXED_OFFICE_NAME}_${selected.join('_')}.csv`; a.click();
   URL.revokeObjectURL(url);
   showToast('匯出成功','success');
   closeExportPanel();
@@ -524,44 +568,75 @@ function closeVehiclePanel() {
   document.getElementById('vehiclePanelOverlay').classList.remove('open');
 }
 function renderVehiclePanelList() {
-  const el = document.getElementById('vehiclePanelList');
-  el.innerHTML = vehicles.map(v=>`
-    <div class="mgmt-item">
-      <span class="mgmt-plate">${v.plate}</span>
-      <button class="mgmt-delete" data-id="${v.id}">刪除</button>
-    </div>`).join('')||'<div class="empty-state">尚無車輛</div>';
+  const el=document.getElementById('vehiclePanelList');
+  el.innerHTML=vehicles.map(v=>`<div class="mgmt-item">
+    <span class="mgmt-plate">${v.plate}</span>
+    <button class="mgmt-delete" data-id="${v.id}">刪除</button>
+  </div>`).join('')||'<div class="empty-state">尚無車輛</div>';
   el.querySelectorAll('.mgmt-delete').forEach(btn=>{ btn.addEventListener('click',()=>deleteVehicle(btn.dataset.id)); });
 }
 async function addVehicle() {
-  const plate = document.getElementById('newVehiclePlate')?.value.trim();
-  if (!plate) { showToast('請填寫車牌','error'); return; }
-  const { error } = await db.from('vehicles').insert({ office_id:selectedOfficeId, plate, name:plate });
-  if (error) { showToast('新增失敗：'+error.message,'error'); return; }
+  const plate=document.getElementById('newVehiclePlate')?.value.trim();
+  if(!plate){ showToast('請填寫車牌','error'); return; }
+  const { error }=await db.from('vehicles').insert({ office_id:selectedOfficeId, plate, name:plate });
+  if(error){ showToast('新增失敗：'+error.message,'error'); return; }
   document.getElementById('newVehiclePlate').value='';
   showToast('車輛已新增','success');
-  await loadVehicles();
-  renderVehiclePanelList();
+  await loadVehicles(); renderVehiclePanelList();
 }
 async function deleteVehicle(id) {
-  const { error } = await db.from('vehicles').delete().eq('id',id);
-  if (error) { showToast('刪除失敗','error'); return; }
+  const { error }=await db.from('vehicles').delete().eq('id',id);
+  if(error){ showToast('刪除失敗','error'); return; }
   showToast('車輛已刪除','success');
-  await loadVehicles();
-  renderVehiclePanelList();
+  await loadVehicles(); renderVehiclePanelList();
   await loadMonthData(); await loadAllBookings();
+}
+
+// ===== 原因管理面板 =====
+function openReasonPanel() {
+  document.getElementById('reasonPanel').classList.add('open');
+  document.getElementById('reasonPanelOverlay').classList.add('open');
+  renderReasonList();
+}
+function closeReasonPanel() {
+  document.getElementById('reasonPanel').classList.remove('open');
+  document.getElementById('reasonPanelOverlay').classList.remove('open');
+}
+function renderReasonList() {
+  const el=document.getElementById('reasonList');
+  el.innerHTML=blockReasons.map(r=>`<div class="mgmt-item">
+    <span class="mgmt-plate">${r.reason}</span>
+    <button class="mgmt-delete" data-id="${r.id}">刪除</button>
+  </div>`).join('')||'<div class="empty-state">尚無原因</div>';
+  el.querySelectorAll('.mgmt-delete').forEach(btn=>{
+    btn.addEventListener('click',async()=>{
+      await db.from('block_reasons').delete().eq('id',btn.dataset.id);
+      await loadBlockReasons(); renderReasonList();
+      showToast('已刪除','success');
+    });
+  });
+}
+async function addReason() {
+  const val=document.getElementById('newReason')?.value.trim();
+  if(!val){ showToast('請輸入原因','error'); return; }
+  const { error }=await db.from('block_reasons').insert({ reason:val });
+  if(error){ showToast('新增失敗','error'); return; }
+  document.getElementById('newReason').value='';
+  await loadBlockReasons(); renderReasonList();
+  showToast('原因已新增','success');
 }
 
 // ===== 管理員 =====
 function openAdminModal() {
-  if (adminLevel) { adminLevel=null; updateAdminUI(); showToast('已登出管理員模式'); return; }
+  if(adminLevel){ adminLevel=null; updateAdminUI(); showToast('已登出管理員模式'); return; }
   document.getElementById('adminPassword').value='';
   document.getElementById('adminError').textContent='';
   document.getElementById('adminModal').classList.add('open');
   setTimeout(()=>document.getElementById('adminPassword').focus(),100);
 }
 function confirmAdmin() {
-  const pw = document.getElementById('adminPassword').value.trim();
-  if (pw===PASSWORDS.admin) {
+  const pw=document.getElementById('adminPassword').value.trim();
+  if(pw===PASSWORDS.admin){
     adminLevel='admin';
     document.getElementById('adminModal').classList.remove('open');
     updateAdminUI();
@@ -569,43 +644,50 @@ function confirmAdmin() {
   } else { document.getElementById('adminError').textContent='密碼錯誤'; }
 }
 function updateAdminUI() {
-  const btn = document.getElementById('adminBtn');
-  btn.textContent = adminLevel ? '管理員（登出）' : '管理員入口';
-  btn.classList.toggle('active', !!adminLevel);
-  document.getElementById('adminBar').style.display = adminLevel ? 'flex' : 'none';
-  if (selectedDate && selectedVehicleIdInSidebar) renderVehicleDetail(selectedDate, selectedVehicleIdInSidebar);
+  const btn=document.getElementById('adminBtn');
+  btn.textContent=adminLevel?'管理員（登出）':'管理員入口';
+  btn.classList.toggle('active',!!adminLevel);
+  document.getElementById('adminBar').style.display=adminLevel?'flex':'none';
+  if(selectedDate&&selectedVehicleIdInSidebar) renderVehicleDetail(selectedDate,selectedVehicleIdInSidebar);
+  else if(selectedDate) renderVehicleList(selectedDate);
 }
 
-// ===== Toast =====
-function showToast(msg, type='') {
-  const el = document.getElementById('toast');
+function showToast(msg,type='') {
+  const el=document.getElementById('toast');
   el.textContent=msg; el.className=`toast ${type} show`;
   setTimeout(()=>el.classList.remove('show'),2500);
 }
 
-// ===== 事件監聽 =====
 function setupEventListeners() {
   document.getElementById('prevMonth').addEventListener('click',()=>{ currentMonth--; if(currentMonth<0){currentMonth=11;currentYear--;} loadMonthData(); });
   document.getElementById('nextMonth').addEventListener('click',()=>{ currentMonth++; if(currentMonth>11){currentMonth=0;currentYear++;} loadMonthData(); });
-  document.getElementById('sidebarClose').addEventListener('click', closeSidebar);
-  document.getElementById('sidebarOverlay').addEventListener('click', closeSidebar);
-  document.getElementById('adminBtn').addEventListener('click', openAdminModal);
-  document.getElementById('adminConfirmBtn').addEventListener('click', confirmAdmin);
+  document.getElementById('sidebarClose').addEventListener('click',closeSidebar);
+  document.getElementById('sidebarOverlay').addEventListener('click',closeSidebar);
+  document.getElementById('adminBtn').addEventListener('click',openAdminModal);
+  document.getElementById('adminConfirmBtn').addEventListener('click',confirmAdmin);
   document.getElementById('adminCancelBtn').addEventListener('click',()=>document.getElementById('adminModal').classList.remove('open'));
   document.getElementById('adminPassword').addEventListener('keydown',e=>{ if(e.key==='Enter') confirmAdmin(); });
-  document.getElementById('blockBtn').addEventListener('click', openBlockPanel);
-  document.getElementById('blockPanelOverlay').addEventListener('click', closeBlockPanel);
-  document.getElementById('blockPanelClose').addEventListener('click', closeBlockPanel);
-  document.getElementById('submitBlockBtn').addEventListener('click', submitBlock);
-  document.getElementById('exportBtn').addEventListener('click', openExportPanel);
-  document.getElementById('exportPanelOverlay').addEventListener('click', closeExportPanel);
-  document.getElementById('exportPanelClose').addEventListener('click', closeExportPanel);
-  document.getElementById('submitExportBtn').addEventListener('click', submitExport);
-  document.getElementById('vehicleMgmtBtn').addEventListener('click', openVehiclePanel);
-  document.getElementById('vehiclePanelOverlay').addEventListener('click', closeVehiclePanel);
-  document.getElementById('vehiclePanelClose').addEventListener('click', closeVehiclePanel);
-  document.getElementById('addVehicleBtn').addEventListener('click', addVehicle);
+  document.getElementById('blockBtn').addEventListener('click',openBlockPanel);
+  document.getElementById('blockPanelOverlay').addEventListener('click',closeBlockPanel);
+  document.getElementById('blockPanelClose').addEventListener('click',closeBlockPanel);
+  document.getElementById('submitBlockBtn').addEventListener('click',submitBlock);
+  document.getElementById('unblockBtn').addEventListener('click',openUnblockPanel);
+  document.getElementById('unblockPanelOverlay').addEventListener('click',closeUnblockPanel);
+  document.getElementById('unblockPanelClose').addEventListener('click',closeUnblockPanel);
+  document.getElementById('exportBtn').addEventListener('click',openExportPanel);
+  document.getElementById('exportPanelOverlay').addEventListener('click',closeExportPanel);
+  document.getElementById('exportPanelClose').addEventListener('click',closeExportPanel);
+  document.getElementById('submitExportBtn').addEventListener('click',submitExport);
+  document.getElementById('vehicleMgmtBtn').addEventListener('click',openVehiclePanel);
+  document.getElementById('vehiclePanelOverlay').addEventListener('click',closeVehiclePanel);
+  document.getElementById('vehiclePanelClose').addEventListener('click',closeVehiclePanel);
+  document.getElementById('addVehicleBtn').addEventListener('click',addVehicle);
   document.getElementById('newVehiclePlate').addEventListener('keydown',e=>{ if(e.key==='Enter') addVehicle(); });
+  document.getElementById('reasonMgmtBtn').addEventListener('click',openReasonPanel);
+  document.getElementById('reasonPanelOverlay').addEventListener('click',closeReasonPanel);
+  document.getElementById('reasonPanelClose').addEventListener('click',closeReasonPanel);
+  document.getElementById('addReasonBtn').addEventListener('click',addReason);
+  document.getElementById('newReason').addEventListener('keydown',e=>{ if(e.key==='Enter') addReason(); });
 }
 
 init();
